@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "FitSocial",
+    "slug": "fitsocial",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 37,
+            "targetSdkVersion": 36
+          }
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.fitsocial.app"
+    }
+  }
+}

@@ -1,0 +1,1 @@
+"""FitSocial FastAPI application package."""
