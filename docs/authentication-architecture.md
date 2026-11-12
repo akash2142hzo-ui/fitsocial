@@ -190,7 +190,7 @@ For a protected request:
 13. Do not trust `user_metadata`, `app_metadata`, or other client-controlled/custom metadata for privileges, roles, ownership, or moderation decisions.
 14. Reject a missing, malformed, string-valued, or otherwise non-boolean `is_anonymous` claim for protected endpoints. Do not infer `false` from a missing claim, and do not assume that PostgreSQL’s `authenticated` role excludes anonymous identities.
 15. Reject `is_anonymous=true` identities. Anonymous access, if ever introduced, requires a separate explicitly public route policy and must never satisfy `require_authenticated_user`.
-16. Load the application account by `sub`.
+16. After JWT verification succeeds, construct an immutable context from the verified claims, then initialize the protected database transaction and canonical subject context described in section 7. Load the application account by `sub` inside that transaction.
 17. Reject missing, suspended, deactivated, or deleted accounts according to account policy.
 18. Query the shared PostgreSQL revocation registry using the verified `session_id`; reject revoked sessions and return `503` when status cannot be determined safely.
 19. Return an immutable authenticated-user context to downstream dependencies.
@@ -294,6 +294,7 @@ Rules:
 - Route handlers receive `AuthenticatedUser` through dependency injection.
 - A path/body/query `user_id` is treated as a resource target and must never override the authenticated actor.
 - The dependency must not return a user context when verification is incomplete.
+- Construct immutable normalized identity from verified JWT claims before opening a protected database transaction. Account-state checks may enrich the final immutable context inside that transaction; they must not replace the verified subject with caller-supplied identity.
 - The context should contain only normalized identity and account-state data needed by authorization.
 - Avoid placing raw JWT claims in logs or broad request state.
 - Public health and readiness endpoints must not require this dependency.
@@ -302,33 +303,56 @@ Rules:
 
 FastAPI’s verified identity does not automatically flow through a separate PostgreSQL connection. PostgreSQL/Supabase RLS will not see the original mobile JWT unless the application explicitly establishes database session context or uses a database access path designed to preserve that identity.
 
-### Option A: transaction-local verified claims with a non-RLS-bypassing role
+### V1 protected transaction and identity propagation
 
-For each request, after JWT verification and before application queries:
+Explicit FastAPI authorization and PostgreSQL RLS are independent required security layers. The following is the approved design direction, not an implemented or verified database guarantee:
 
-1. Begin a database transaction.
-2. Use a restricted database role that does not have `BYPASSRLS` and is not a table owner that bypasses the intended policies.
-3. Set transaction-local, server-derived claims such as the verified subject and account ID using a safe parameterized mechanism.
-4. Execute all queries that depend on RLS within that same transaction and connection.
-5. Roll back or commit, then discard the transaction-local context.
+1. FastAPI completes JWT signature and required-claim verification before opening a protected database transaction. Construct an immutable identity context from the verified claims; never derive the actor from path, body, query, or untrusted metadata.
+2. Acquire one runtime-role connection and begin one explicit, short `READ COMMITTED` transaction per protected request. The connection and transaction are owned by that request and must not be shared between concurrent asynchronous requests.
+3. Install only the canonical verified subject UUID as identity context using parameterized transaction-local `set_config` with its local argument set to `true`. Use one canonical source: if represented as `request.jwt.claims`, its identity payload contains only the normalized `sub` UUID. Do not install the raw JWT, arbitrary claims, a second caller-provided account identifier, or privilege flags.
+4. A reviewed identity reader must accept only that canonical source and a valid subject UUID. Missing, empty, malformed, or invalid identity context denies protected access. Do not fall back to another session setting or assume an installed Supabase helper uses the same source without inspection.
+5. Identity installation, account-state and existing primary-database session-status checks, and every protected repository query use the same connection and transaction. Resource authorization follows those checks. This preserves the mandatory revocation checks in section 4.5; it does not introduce a session-status cache or a replica read.
+6. Commit successful work before reporting a mutation as complete. Roll back on application errors, timeouts, or cancellation. Return a connection to the pool only after successful cleanup; cleanup failure or uncertain connection state requires connection discard. A lost commit acknowledgement remains an uncertain outcome, not permission to retry mutations blindly.
 
-The claims must come only from the verified `AuthenticatedUser`; clients must not set them. Connection pooling must prevent context leakage between requests, and tests must prove isolation when requests execute concurrently. A failed transaction setup must fail closed.
+### Pooling, repository boundaries, and failure behavior
 
-### Option B: explicit server-side authorization predicates
+- No session-level identity settings are permitted. Transaction-local settings revert at transaction end, which is insufficient if a previous session-level identity existed; the pool baseline must contain no persistent actor context. Unexpected pre-existing identity state must cause connection rejection/discard rather than reuse under another user.
+- Repository functions require an initialized identity transaction, not unrestricted pool access. Reject protected queries outside that boundary, including implicit/autocommit queries, database work after transaction close, or work accidentally launched in a separate asynchronous task/session. Database policies must independently deny access when valid identity is absent.
+- Do not reuse a request transaction for background work. Commit, rollback, failed setup, cancellation, and connection reuse must all preserve user isolation. No session-specific authorization decision may survive into the next borrower.
+- A failed identity setup, database connection failure, pool timeout, or inability to establish authorization denies protected work. Infrastructure failures use a controlled availability error, not an empty/anonymous context that continues processing.
+- The pool must preserve connection affinity throughout each transaction. Pooling implementation and behavior must be tested against the deployed connection model; never assume connection reset or async isolation merely because a pool library is present.
 
-Repositories include authorization predicates directly in every query, for example owner, active relationship, block, membership, moderation, and resource visibility conditions. The actor ID is bound from `AuthenticatedUser`, never from request data. This is easier to reason about in a modular monolith and remains required even if RLS is added as defense in depth.
+### Roles, ownership, and RLS enforcement
 
-### Comparison and privileged connections
+- The ordinary runtime application role is non-owner, non-superuser, and has no `BYPASSRLS`. Its effective memberships and role-switching paths must not provide owner or bypass privileges. JWT role claims never select a PostgreSQL role.
+- Migration/owner credentials are separate and must never be available to ordinary API workers. Runtime request paths must not borrow migration connections or escalate to an owner role.
+- Enable and `FORCE ROW LEVEL SECURITY` on protected tables. `FORCE` does not make superuser or `BYPASSRLS` access safe and does not replace runtime/owner separation. Owners can change policy definitions, so migration credentials remain a separate trust boundary.
+- Use least-privilege schema, table, column, sequence, and function grants as needed. Runtime must not be able to alter policies, create shadow objects in trusted lookup schemas, or use whole-table operations such as `TRUNCATE` to evade row policy enforcement. Exact role names, grants, revokes, and default privileges remain unresolved until hosting and schema decisions are approved.
 
-- Option A can centralize row policy enforcement in PostgreSQL, but requires careful transaction scoping, pool hygiene, policy testing, and operational handling of connection failures.
-- Option B keeps policy logic visible in application repositories and is appropriate for complex relationship checks, but every read/write path must use the shared policy helpers and query review process.
-- The recommended approach is explicit server-side authorization predicates as the primary control, with Option A/RLS as defense in depth where its transaction semantics can be proven.
-- A privileged or `BYPASSRLS` database connection can read or change rows regardless of user policy. It must not be used as if it were user-scoped access, and it must not receive client-controlled identity claims. If privileged access is unavoidable for migrations or tightly controlled service operations, isolate it from request handling, restrict credentials, audit use, and require explicit authorization predicates for any user-derived operation.
-- Supabase RLS does not automatically receive the original mobile JWT through a separate FastAPI database connection. Passing a client JWT to PostgreSQL without a deliberate, verified context design is not sufficient and can create confused-deputy or identity-spoofing risks.
+### Explicit application authorization and policy boundaries
+
+Repositories include server-owned authorization predicates in every query, covering owner, active relationships, blocks, membership, moderation, and visibility. Actor identity is bound from the verified context, never from request data. RLS remains independently enforced if an application predicate is accidentally omitted; application policy is not removed because RLS exists.
+
+Protected policies must require valid identity, including when granting public-content reads. Existing-row access and proposed inserted/updated rows need distinct checks so a user cannot change ownership or reparent workout exercises/sets into another user's session. Nested records inherit parent authorization. Profile ownership must not grant arbitrary access to sensitive columns or moderation state; final field exposure and moderation access remain unresolved.
+
+Relationship-based policies must avoid recursive policy evaluation, hidden evidence that silently weakens block/membership checks, and permissive-policy combinations that accidentally override mandatory restrictions. Final SQL policies and schema are not specified by this document.
+
+### Trust limitations and privileged helpers
+
+- Transaction-local claims are assertions made by the backend, not independent database authentication of the original JWT. PostgreSQL does not verify the JWT merely because FastAPI installed a subject setting.
+- Arbitrary SQL execution under the runtime credential can potentially change identity context and impersonate another user. RLS with backend-set claims is not a containment guarantee for SQL injection or a compromised runtime credential. Parameterized queries and preventing arbitrary SQL execution remain mandatory.
+- Any `SECURITY DEFINER` helper requires separate security review before approval. Its necessity, owner, grants, trusted name resolution, actor derivation, callable surface, and interaction with RLS must be reviewed. Do not introduce a broad definer function or privileged role as a convenient policy bypass. Exact helper requirements remain unresolved.
+- Background workers and scheduled jobs require separately defined, narrowly scoped authorization. User-scoped work must re-establish an authorized actor and current permissions; service maintenance requires explicitly approved operation-specific privileges. Workers must not inherit a request's closed transaction or use migration credentials as a shortcut. Maintenance-worker permissions remain unresolved.
+
+### Hosting consistency and unverified status
+
+`DATABASE.md` links application profiles to the Supabase Auth UUID and describes `auth.users`; `ARCHITECTURE.md` leaves database hosting open. Final hosting and the actual `auth.users` linkage remain unresolved. Do not assume a local foreign key to a remote Auth database or select a competing schema/migration authority implicitly.
+
+Actual RLS behavior cannot be claimed until tested against real, isolated PostgreSQL using the runtime role and effective privileges intended for deployment. Documentation, mocked repositories, and successful tests under an owner/superuser connection do not establish runtime RLS enforcement.
 
 ### RLS and authorization tests
 
-Test transaction-local context isolation between concurrent requests, rollback/connection reuse, non-RLS-bypassing role configuration, and rejection of any attempt to set context from client input. Test that privileged connections cannot be reached through ordinary request repositories.
+The required PostgreSQL tests in section 13 must prove transaction-local isolation, commit/rollback and connection reuse, role restrictions, failure cleanup, and worker authorization. They must verify that privileged connections cannot be reached through ordinary request repositories.
 
 ## 8. Authorization architecture
 
@@ -337,8 +361,10 @@ Authentication and authorization remain separate layers:
 ```text
 Bearer token
   -> JWT verifier
-  -> AuthenticatedUser
+  -> immutable verified identity context
+  -> initialized READ COMMITTED identity transaction
   -> account status check
+  -> existing primary-database session-status check
   -> resource policy / relationship policy
   -> repository query with server-owned predicates
 ```
@@ -554,7 +580,7 @@ Use generated test-only ES256 and RS256 key pairs and a local in-memory/fake JWK
 
 ### Authorization integration tests
 
-With test repositories/database doubles or an isolated test database:
+Application policy tests may use repository doubles. The RLS/identity tests below require real isolated PostgreSQL using the intended runtime role; doubles do not prove database enforcement:
 
 - owner can access owned private resource;
 - another user cannot access it;
@@ -570,6 +596,20 @@ With test repositories/database doubles or an isolated test database:
 - transaction-local RLS context is isolated between concurrent requests;
 - a non-RLS-bypassing role cannot read rows outside its verified context;
 - privileged database connections cannot be reached through ordinary request paths.
+- missing, empty, malformed, and invalid-UUID context denies protected reads and writes;
+- user A cannot read, update, or delete user B's private records, including direct workout exercise/set IDs;
+- ownership changes and child reparenting into another user's workout are denied;
+- both commit and rollback clear transaction identity; a pool-size-one test forces A, B, then missing-context reuse without leakage;
+- deliberately interleaved concurrent A/B requests retain their own transaction identities;
+- exceptions, cancellation, timeouts, and broken connections trigger cleanup or discard; cleanup failure never returns a connection to the pool;
+- unexpected session-level identity state is rejected rather than reused;
+- protected queries outside an initialized identity transaction, or after it closes, are rejected;
+- runtime effective privileges are non-owner, non-superuser, and non-`BYPASSRLS`; role memberships cannot enable escalation;
+- protected tables have enabled and forced RLS, and runtime cannot disable policies, truncate protected tables, or assume the migration/owner role;
+- separately approved definer helpers resist identity substitution, unsafe name resolution, and unauthorized invocation;
+- background jobs execute only explicitly authorized user-scoped or maintenance operations and are denied adjacent unauthorized operations;
+- relationship policies do not recurse, miss required block/membership evidence, or grant access through permissive-policy combinations;
+- database failures deny protected work; uncertain commit outcomes are not reported as confirmed success or blindly retried.
 
 ### Mobile integration tests
 
@@ -639,6 +679,11 @@ The proposed `JWKS_CACHE_TTL_SECONDS` value is 600. Despite its name, `JWKS_MAX_
 15. Account deletion/session invalidation behavior and retention policy.
 16. Operational mechanism for distributing and confirming emergency invalidation across every serving worker, including worker admission/restart behavior.
 17. Exact provider compatibility for supported JWK metadata, including algorithm declaration, key type, curve, and any signing-use metadata required by the selected verifier.
+18. Final database hosting and actual `auth.users` linkage, including the migration authority.
+19. Exact database role names, effective memberships, schema/object grants and revokes, and default privileges.
+20. Whether any `SECURITY DEFINER` helper is necessary, and its separately reviewed security contract.
+21. Maintenance-worker identities and exact operation-scoped permissions.
+22. Profile-field exposure and narrowly defined moderation access rules.
 
 ## 17. Approval gate
 
@@ -651,6 +696,7 @@ Implementation must not begin until the team approves:
 - secure mobile storage package;
 - production CORS and rate-limit policy;
 - staff-role source of truth;
+- database hosting/Auth linkage, exact role/grant design, any separately reviewed definer helpers, worker authorization, and unresolved profile/moderation access; the transaction-local RLS design is documented but not yet verified against PostgreSQL;
 - the full test matrix above.
 
 ### Official references
