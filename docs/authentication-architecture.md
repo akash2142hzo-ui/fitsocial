@@ -17,7 +17,7 @@ This design builds on the approved modular monolith. Authentication establishes 
 2. Verify asymmetric JWT signatures using Supabase-published JWKS keys.
 3. Avoid distributing or depending on the legacy `SUPABASE_JWT_SECRET`.
 4. Bind every protected request to the verified JWT subject (`sub`).
-5. Make key rotation, unknown keys, network failures, and revoked keys fail closed without misclassifying infrastructure failures as bad credentials.
+5. Make key rotation, unknown keys, network failures, and revoked keys fail closed without misclassifying infrastructure failures as bad credentials; application cache limits do not establish an end-to-end provider revocation guarantee.
 6. Prevent access-token, refresh-token, credential, and authorization-data leakage.
 7. Keep mobile session handling in platform-protected storage.
 
@@ -167,13 +167,14 @@ For a protected request:
 3. Parse only the protected header and claims needed for verification, without trusting them yet.
 4. Require a supported asymmetric algorithm:
    - `ES256` by default;
-   - `RS256` only when compatibility with an approved issuer configuration requires it.
-5. Reject `none`, all HMAC algorithms (`HS256`, etc.), algorithm/key-type mismatches, and unexpected algorithms. The configured algorithm allowlist is server-side and must not be changed by a request.
-6. Require a non-empty `kid`; a missing `kid` is rejected immediately and never triggers a refresh or key guess.
+   - `RS256` only through explicit server configuration after compatibility with the actual provider configuration is verified.
+5. Reject `none`, all HMAC algorithms (`HS256`, etc.), `EdDSA`, algorithm/key-type mismatches, and all other unexpected algorithms. The configured algorithm allowlist is server-side and must not be changed by a request.
+6. Require a non-empty string `kid`; reject missing, whitespace-only, or oversized values before network access. Enforce a bounded byte length, match the identifier exactly, and never interpret it as a URL or path.
 7. Resolve only the JWK whose `kid` exactly matches the token header from the in-memory cache.
-8. If that exact `kid` is unknown, force exactly one JWKS refresh and retry that exact lookup once. If it remains unknown, reject the token; never guess or fall back to another key.
+8. If that exact `kid` is unknown, allow at most one eligible shared JWKS refresh attempt, subject to the per-project cooldown and failure backoff in section 5.4, then retry that exact lookup once. A request may join an in-flight attempt rather than start another. Apply section 5.6 when refresh is suppressed or unavailable; never guess or fall back to another key.
 9. Convert the JWK to a verification key using a maintained JWT library; do not implement cryptography manually.
 10. Verify the signature and claims together.
+    - An invalid signature using an already-known key returns generic `401` and never triggers a JWKS refresh.
 11. Validate:
     - exact configured issuer;
     - expiration (`exp`) and required current-time semantics;
@@ -198,8 +199,9 @@ Signature verification must not be split from claim verification. A valid signat
 
 ### 5.3 ES256 and RS256
 
-- ES256 is the recommended default for new Supabase signing-key configurations.
-- Retain RS256 only where an approved compatibility requirement or existing issuer configuration requires it.
+- ES256 is the enabled-by-default V1 verifier algorithm; this does not assert which algorithm the actual Supabase project uses.
+- Enable RS256 only through explicit server configuration after provider compatibility is verified. The actual project's signing algorithm remains unresolved.
+- HS256, other HMAC algorithms, EdDSA, and `none` are not enabled or accepted.
 - The verifier must support each enabled algorithm only when the selected JWK explicitly declares the corresponding algorithm and key type.
 - `ES256` requires an EC P-256 verification key.
 - `RS256` requires an RSA verification key.
@@ -208,39 +210,63 @@ Signature verification must not be split from claim verification. A valid signat
 
 ### 5.4 JWKS cache
 
-Use a process-local cache keyed by JWKS URL and `kid`, with:
+Use a process-local snapshot scoped to the configured project/JWKS URL, with exact `kid` lookup. The application cache and Supabase's upstream caches are separate layers.
 
-- a normal cache age of at most **10 minutes**, unless a shorter provider directive is received;
-- an absolute maximum stale age of **15 minutes**; a key must not be used beyond this age without a successful JWKS refresh;
-- Supabase’s edge/CDN may cache the JWKS response independently, so an application refresh can still receive an edge-cached key set. The verifier must honor provider cache headers only within the above limits and must not claim that a refresh proves instantaneous key revocation;
-- a single-flight refresh so concurrent unknown-key requests do not create a request storm;
-- HTTP cache headers respected only within a bounded maximum;
-- bounded response size, connect timeout, read timeout, and total refresh timeout;
-- no private key material persisted;
-- metrics for cache hits, refreshes, unknown kids, and refresh failures.
+#### Application freshness and age
 
-On an unknown `kid`, perform exactly one forced refresh. If the key remains unknown, reject with `401`. Never accept a token by falling back to the legacy shared secret. A missing `kid` is rejected before cache lookup.
+- Normal application freshness is **600 seconds**. Maximum application cache age is **900 seconds total**, not an additional 900-second stale interval after freshness expires.
+- Measure application elapsed age and refresh scheduling with a monotonic clock. Cache hits and failed refreshes never reset age.
+- Retain the last valid snapshot after refresh failure without extending its lifetime. A known key may be used after normal freshness expires only within the permitted application stale interval; at or beyond the maximum age, usable trust must be re-established or protected access fails closed with `503`.
+- A successful application fetch may still return an upstream-cached representation. A new download is not evidence that the origin key set was regenerated or that a provider revocation has propagated.
+- **Unresolved before implementation:** whether upstream response age can be reliably established, and the final cache-age accounting policy after considering upstream caching. The 600/900-second values define application policy targets; they do not settle representation-age accounting or establish an end-to-end revocation bound. Do not assume that HTTP `Age` headers exist, are sufficient, or permit bypassing/reliably detecting upstream caching.
+- No response header may extend the application limits. Any shorter freshness or mandatory revalidation behavior must be accounted for in the final upstream-age policy rather than silently ignored.
+
+#### Supabase upstream caching limitation
+
+Supabase documents a **10-minute edge cache** for its JWKS discovery endpoint and notes that client libraries may cache keys in memory for **another 10 minutes**. Its signing-key guidance describes a **20-minute** multi-level cache cycle, potentially longer with custom setups, and advises ensuring all application caches have picked up a standby key before rotation. Following that guidance, allow at least **20 minutes** around key creation/revocation before relying on propagation; this is a minimum operational planning allowance, not a provider completion guarantee. See [Supabase signing keys: public key discovery and caching](https://supabase.com/docs/guides/auth/signing-keys#public-key-discovery-and-caching).
+
+FitSocial's custom backend has its own cache, not an assumed Supabase-client cache. The provider's guidance does not establish an exact combined bound for this backend; elapsed waiting alone does not confirm propagation. In particular, **900 seconds of application cache age is not a 15-minute end-to-end signing-key revocation guarantee**. A forced refresh may still encounter upstream-cached keys. Do not invent HTTP-header semantics, instantaneous origin revalidation, or guaranteed propagation deadlines.
+
+#### Refresh eligibility and concurrency
+
+- An unknown `kid` permits **at most one eligible shared refresh attempt** per verification request, then one exact lookup. It does not entitle each caller to a separate HTTP request.
+- Apply a per-project cooldown of at least **10 seconds** between ordinary refresh starts in each worker. After consecutive failures, use **10, 20, 40, then 60 seconds** of backoff, plus nonnegative additive jitter. Successful validated refresh resets failure backoff; it does not disable the ordinary cooldown.
+- Use single-flight refresh per configured project per worker process. Recheck snapshot generation before starting a fetch; concurrent callers share the result and wait only for a bounded duration. Cancellation of one waiter must not cancel the shared fetch. Release coordination state on success, failure, or timeout.
+- These controls are process-local: they prevent concurrent and sequential amplification within a worker, not one fleet-wide request. Capacity review must account for the number of workers.
+- Do not create unbounded per-`kid` cache or retry state from attacker-controlled identifiers. A recent successful snapshot and refresh outcome can bound repeated absent-key lookups during cooldown; section 5.6 defines the response distinction.
+- Missing, whitespace-only, oversized, or otherwise invalid `kid` values never initiate network access. An already-known key's invalid signature never initiates refresh. No legacy-secret fallback is permitted.
+
+#### Resource limits
+
+- Limit the JWKS response to **64 KiB after decompression**, enforcing the bound while reading, and to **16 keys**. Reject over-limit documents rather than truncating them.
+- Reject duplicate `kid` values; never choose arbitrarily between duplicate entries.
+- Use a **2-second connect timeout** and a **5-second total fetch deadline**, covering response streaming. Do not enable automatic HTTP retries.
+- Reject unusable responses without publishing a partial snapshot or extending the last valid snapshot's age. Publish a validated replacement atomically.
+- Do not persist private key material. Record bounded metrics for cache outcomes, refreshes, throttling, and failures without raw attacker-controlled identifiers or tokens.
 
 ### 5.5 Rotation and revoked keys
 
 - During normal rotation, the cache may contain multiple currently published public keys. Select by `kid`.
 - A refreshed JWKS replaces the trusted key set for future verification; it must not append unbounded historical keys.
-- When a previously cached key disappears from JWKS, apply the bounded cache policy rather than assuming that Supabase’s edge cache has already propagated the removal.
-- After a successful refresh confirms that a key is removed/revoked, reject tokens using it. An independently cached verifier cannot promise instantaneous signing-key revocation: tokens signed before removal may remain verifiable until the verifier refreshes and its permitted cache age expires.
+- When a key is absent from a successfully validated replacement snapshot, remove it from future lookups immediately in that worker. Stale fallback must not resurrect a key from an older snapshot after a successful replacement. A response still containing a key does not prove that provider revocation has not occurred; the response may be upstream-cached.
+- Reject tokens whose key has been removed from the trusted snapshot. An independently cached verifier cannot promise instantaneous signing-key revocation or a 15-minute end-to-end bound; application age limits do not eliminate upstream cache delay.
 - A signing-key revocation invalidates tokens signed by that key once the verifier no longer trusts the key. User-session revocation is separate: it invalidates a user session or refresh capability and may require an application account/session check, provider revocation behavior, or a server-side denylist. Revoking a user session does not necessarily revoke the signing key, and revoking a signing key does not identify which user sessions must be ended.
-- Emergency invalidation for a compromised signing key requires an operator-controlled cache purge across every API instance, disabling use of the affected `kid`, and a forced JWKS refresh before accepting requests. If the JWKS service or Supabase edge has not propagated the change, authentication must fail closed rather than use the affected key. The procedure must be audited and tested operationally.
+- Emergency invalidation requires operator-controlled disabling of the affected `kid` for the configured project, cache invalidation, and trusted refresh coordination across every serving worker. A disabled `kid` must never become trusted again merely because a later JWKS response contains it; disabling remains authoritative until an explicit authorized decision clears it.
+- Every serving worker must confirm the required invalidation state before serving protected traffic, including after startup or restart. Workers without confirmed state must not serve protected traffic. Do not claim fleet-wide invalidation until every serving worker has applied it or unconfirmed workers have been removed from service. The operational distribution and confirmation mechanism remains unresolved and must be selected and tested before this guarantee is claimed.
+- Check disabled-key state before cache use and when publishing refreshed snapshots so a late refresh cannot undo invalidation. If usable trust cannot be established, fail closed; never use the disabled key as an outage fallback. The procedure must be audited and tested operationally.
 - Do not serve indefinitely stale JWKS data during an outage. If the key cannot be confirmed after the bounded stale window, fail closed.
-- Do not log full tokens or key material when rotation or revocation fails.
+- Do not log tokens, raw attacker-controlled `kid` values, or upstream errors when rotation or revocation fails.
 
-The exact stale-key overlap period, provider revocation signal, and token lifetime must be confirmed against the Supabase project’s signing-key policy before production.
+The final age policy, reliable upstream-age evidence, actual provider metadata compatibility, and emergency invalidation mechanism remain unresolved. Supabase's documented waiting guidance is not a guaranteed custom-backend propagation deadline. Token lifetime remains a separate existing decision.
 
 ### 5.6 Network failures
 
 - Existing valid cached keys may be used only inside the documented bounded cache window.
-- If the forced refresh succeeds but the exact `kid` remains absent, reject with `401`; if the refresh is unavailable and no valid cached key matches, return `503`. Neither case may accept an unverified or alternate key.
+- If an eligible shared refresh succeeds but the exact `kid` remains absent, reject with generic `401`. During cooldown, a recent successful snapshot obtained within that cooldown may supply the same absent-key result without another fetch; this can temporarily reject a newly introduced key. If refresh is unavailable or suppressed by failure backoff and there is no usable trusted key or recent successful absence result, return generic `503`. Neither case may accept an unverified or alternate key.
 - An expired cache with no successful refresh is an authentication failure, not a successful request.
 - If no valid cached key is available and the JWKS service is unavailable, return `503 Service Unavailable`; do not make an authentication infrastructure outage appear to be invalid credentials.
 - Return a generic `401` for invalid/missing credentials and a generic `503` for unavailable authentication infrastructure. Do not reveal whether a `401` problem was signature, key lookup, issuer, audience, or claim state.
+- Include `WWW-Authenticate: Bearer` on `401` responses and `Cache-Control: no-store` on authentication-error responses, including `503`. Never expose tokens, raw attacker-controlled `kid` values, or upstream errors in responses or logs.
 - Record structured internal metrics/error codes without recording tokens or sensitive claims.
 
 ## 6. FastAPI authenticated-user dependency
@@ -396,7 +422,7 @@ Bearer token
 ### Client responses
 
 - Missing or malformed credentials: `401`.
-- Invalid signature, issuer, audience, expiry, unknown key, revoked key, or other invalid/missing authentication: generic `401`.
+- Invalid signature, issuer, audience, expiry, a key confirmed absent under section 5.6, a disabled key, or other invalid/missing authentication: generic `401`. Unknown-key infrastructure failures follow the `503` rules rather than automatically becoming `401`.
 - Unavailable JWKS/authentication infrastructure when no valid cached key is available: generic `503 Service Unavailable`.
 - Unable to establish session status because the authoritative revocation database is unavailable: generic `503 Service Unavailable`.
 - Logout with either Supabase revocation or backend registry insertion incomplete: a non-success/incomplete outcome; never claim both effects succeeded.
@@ -404,6 +430,7 @@ Bearer token
 - Authenticated but insufficient authorization: `403`.
 - Use `404 Not Found` where private-resource concealment is appropriate and approved by the resource policy.
 - Never distinguish “user does not exist,” “token is expired,” “key is revoked,” and “audience is wrong” in public messages.
+- Include `WWW-Authenticate: Bearer` for `401` and `Cache-Control: no-store` for authentication errors, including `503`. Public errors must not expose tokens, raw attacker-controlled `kid` values, or upstream errors.
 
 ### Logs and metrics
 
@@ -413,22 +440,23 @@ Never log:
 - `Authorization` headers;
 - passwords;
 - JWT signatures;
+- raw attacker-controlled `kid` values or upstream error messages/bodies;
 - full email addresses unless operationally justified;
 - private profile, workout, or measurement contents.
 
-Allowed structured metadata includes request ID, route, status, failure category, `kid` (if safe), issuer configuration identifier, latency, and rate-limit outcome. Hash or truncate identifiers where correlation is sufficient.
+Allowed structured metadata includes request ID, route, status, failure category, issuer configuration identifier, latency, and rate-limit outcome. Use bounded server-controlled key references or safe derived correlation identifiers when needed; never log raw attacker-controlled `kid` values. Hash or truncate identifiers where correlation is sufficient and bound metric cardinality.
 
 ## 12. Threat considerations
 
 | Threat | Control |
 |---|---|
-| Forged JWT | Strict ES256/RS256 signature verification against trusted JWKS |
+| Forged JWT | Strict ES256 verification; RS256 only when explicitly enabled after provider compatibility verification |
 | Algorithm confusion | Fixed asymmetric allowlist and JWK key-type validation |
 | Wrong project token | Exact issuer and audience validation |
 | Expired/not-yet-valid token | `exp` and `nbf` validation with bounded clock skew |
-| Unknown signing key | One forced JWKS refresh, then fail closed |
+| Unknown signing key | At most one eligible shared refresh, cooldown/backoff, then exact lookup and fail-closed `401`/`503` mapping |
 | Signing-key rotation | `kid` selection, bounded cache, refresh metrics, no legacy-secret fallback |
-| Revoked signing key | Bounded cache policy and rejection after trusted key-set refresh |
+| Revoked signing key | Bounded application cache, atomic key-set replacement, persistent operator disabling across serving workers; no end-to-end provider propagation deadline claimed |
 | Stolen refresh token | Secure storage, serialized refresh, provider rotation/reuse handling, logout cleanup |
 | Stolen access token | Short token lifetime, HTTPS, no logging, account-status checks, and the mandatory shared session-revocation registry |
 | Revoked access-token session | Shared PostgreSQL `session_id` registry checked on every protected request; primary-only read and fail closed on registry failure |
@@ -449,13 +477,16 @@ No design eliminates the risk of a compromised device, malicious accessibility s
 Use generated test-only ES256 and RS256 key pairs and a local in-memory/fake JWKS provider:
 
 - valid ES256 token;
-- valid RS256 token;
+- valid RS256 token only when explicitly enabled after compatibility verification; reject it when disabled;
 - invalid signature;
-- unsupported `alg`;
-- algorithm/key-type mismatch;
-- missing `kid` is rejected immediately without refresh;
+- unsupported `alg`, including HS256, EdDSA, and `none`, rejected before network access;
+- strict algorithm/key-type/curve matching and malformed supported JWK parameters;
+- exact metadata compatibility tests against approved public provider fixtures before enabling an algorithm;
+- missing, whitespace-only, non-string, and oversized `kid` rejected immediately without refresh;
 - unknown `kid`;
-- one forced refresh for an unknown key, then `401` if still unknown;
+- at most one eligible shared refresh for an unknown key, then exact lookup and `401` if a successful result still lacks it;
+- unknown-key cooldown absence results versus unavailable trust returning `503`;
+- no refresh after invalid signature with an already-known key;
 - refresh still missing key;
 - JWKS unavailable with no valid cached key returns `503`;
 - expired `exp`;
@@ -473,10 +504,21 @@ Use generated test-only ES256 and RS256 key pairs and a local in-memory/fake JWK
 - missing/invalid `sub`;
 - malformed compact JWT;
 - oversized authorization header;
-- JWKS timeout, malformed response, and HTTP failure;
-- cache hit and cache expiry;
+- 2-second connect timeout and 5-second total fetch deadline, including slow streaming;
+- no automatic HTTP retries; malformed response and HTTP failure retain the last valid snapshot without resetting age;
+- 64-KiB decompressed response limit, decompression expansion, 16-key limit, and duplicate `kid` rejection;
+- monotonic 600-second freshness and 900-second total application-age boundaries; cache hits and failed refreshes do not reset age;
+- a bounded stale known key can survive a failed refresh only inside the permitted window; maximum age without usable refreshed trust returns `503`;
+- upstream-cached successful responses are not treated as proof of origin freshness or a 15-minute revocation guarantee;
+- upstream-age accounting and restrictive cache directives tested once their final policy is approved;
+- per-project single-flight behavior under concurrent cold starts and unknown-key requests;
+- bounded waiter deadlines, one-waiter cancellation isolation, and coordination release after failure;
+- at least 10-second cooldown and 10/20/40/60-second failure backoff with additive jitter;
+- sequential random-`kid` floods cannot bypass refresh budgets or grow unbounded per-identifier state;
 - rotation with old and new `kid`;
-- removed/revoked key after refresh;
+- atomic snapshot replacement; removed keys cannot return through stale fallback;
+- disabled keys remain rejected even when a later response advertises them;
+- invalidation racing with refresh, worker restart, and partial distribution; unconfirmed workers do not serve protected traffic;
 - no fallback to `SUPABASE_JWT_SECRET`.
 
 ### FastAPI dependency tests
@@ -485,6 +527,9 @@ Use generated test-only ES256 and RS256 key pairs and a local in-memory/fake JWK
 - wrong scheme;
 - empty bearer value;
 - verifier failure maps to generic `401`;
+- inability to establish usable JWKS trust maps to generic `503`, not detailed upstream errors;
+- `401` includes `WWW-Authenticate: Bearer`; authentication errors include `Cache-Control: no-store`;
+- authentication responses/logs never expose tokens, raw attacker-controlled `kid`, or upstream errors;
 - verified subject produces the expected `AuthenticatedUser`;
 - suspended/deactivated/deleted application account is rejected;
 - revoked session is rejected from the shared registry;
@@ -558,6 +603,8 @@ AUTH_RATE_LIMIT_MAX_REQUESTS
 
 `SUPABASE_JWT_SECRET` must not be added to the production authentication design.
 
+The proposed `JWKS_CACHE_TTL_SECONDS` value is 600. Despite its name, `JWKS_MAX_STALE_SECONDS` denotes the 900-second maximum total application cache age, not 900 additional stale seconds. Final age accounting remains blocked on the upstream-age decisions in section 5.4; these proposed controls are not implemented configuration guarantees.
+
 ## 15. Dependencies and implementation boundaries
 
 ### Mobile
@@ -581,8 +628,8 @@ AUTH_RATE_LIMIT_MAX_REQUESTS
 4. Actual PostgreSQL HA topology, synchronous standby/quorum, synchronous commit mode, fencing/lease mechanism, promotion automation, and failure testing required to verify the mandatory RPO 0 architecture.
 5. Supabase Auth provider configuration for the approved server-controlled session/refresh-token revocation operation.
 6. Durable retry/outbox storage and worker ownership, retry limits, backoff, and terminal-alert policy for Supabase revocation.
-7. Supabase signing-key algorithm policy: ES256, RS256, or both enabled.
-8. Exact revoked-key overlap/cache policy and provider observability.
+7. Actual Supabase project's signing algorithm; ES256 is the verifier default and RS256 requires explicit configuration after provider compatibility verification.
+8. Whether upstream response age can be reliably established, final cache-age accounting after upstream caching, and provider observability; no end-to-end revocation deadline is established by the application limits.
 9. JWT `aud` value(s) issued by the selected Supabase project.
 10. Whether the backend creates an application profile lazily or through an explicit bootstrap transaction.
 11. Rate-limit storage mechanism for the modular monolith and multi-instance deployment.
@@ -590,13 +637,16 @@ AUTH_RATE_LIMIT_MAX_REQUESTS
 13. Secure-storage package selection and Android backup behavior.
 14. Staff-role source of truth and emergency revocation process.
 15. Account deletion/session invalidation behavior and retention policy.
+16. Operational mechanism for distributing and confirming emergency invalidation across every serving worker, including worker admission/restart behavior.
+17. Exact provider compatibility for supported JWK metadata, including algorithm declaration, key type, curve, and any signing-use metadata required by the selected verifier.
 
 ## 17. Approval gate
 
 Implementation must not begin until the team approves:
 
-- JWT library and JWKS cache behavior;
-- signing algorithms, issuer, audience, and token lifetime;
+- JWT library, final JWKS age accounting against upstream caching, and provider metadata compatibility; the bounded refresh/resource policy is documented but not implemented;
+- actual project signing algorithm and any explicitly enabled RS256 support, issuer, audience, and token lifetime;
+- operational emergency invalidation distribution/confirmation mechanism and fail-closed admission of serving workers;
 - mandatory v1 session-revocation model, including `session_id` validation, logout coordination, RPO 0 durability, and synchronous failover promotion;
 - secure mobile storage package;
 - production CORS and rate-limit policy;
