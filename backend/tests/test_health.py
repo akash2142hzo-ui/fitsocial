@@ -6,10 +6,19 @@ from pydantic import SecretStr
 from pytest import MonkeyPatch
 
 from app.core.config import Settings
-from app.main import app, create_app
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
 
 
 def test_health_endpoint() -> None:
+    from app.main import app
+
     client = TestClient(app)
 
     response = client.get("/api/v1/health")
@@ -20,6 +29,8 @@ def test_health_endpoint() -> None:
 
 
 def test_create_app_uses_supplied_settings() -> None:
+    from app.main import create_app
+
     application = create_app(Settings(app_env="test"))
 
     assert application.title == "FitSocial API"
@@ -32,7 +43,7 @@ def test_development_settings_defaults_are_safe() -> None:
 
     assert settings.app_env == "development"
     assert settings.database_url.get_secret_value() == ""
-    assert settings.supabase_jwt_secret.get_secret_value() == ""
+    assert settings.supabase_jwks_url == ""
 
 
 def test_settings_load_environment_variables(monkeypatch: MonkeyPatch) -> None:
@@ -40,14 +51,15 @@ def test_settings_load_environment_variables(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test-user:test-password@localhost/test")
     monkeypatch.setenv("SUPABASE_URL", "https://test-project.supabase.co")
     monkeypatch.setenv("SUPABASE_JWT_ISSUER", "https://test-project.supabase.co/auth/v1")
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", "test-only-secret")
 
     settings = Settings()
 
     assert settings.app_env == "test"
     assert settings.database_url.get_secret_value().startswith("postgresql://")
-    assert settings.supabase_jwt_secret.get_secret_value() == "test-only-secret"
-    assert "test-only-secret" not in repr(settings)
+    assert settings.supabase_jwks_url == (
+        "https://test-project.supabase.co/auth/v1/.well-known/jwks.json"
+    )
+    assert "test-password" not in repr(settings)
 
 
 def test_production_settings_require_service_configuration() -> None:
@@ -56,12 +68,13 @@ def test_production_settings_require_service_configuration() -> None:
 
 
 def test_production_settings_disable_api_documentation() -> None:
+    from app.main import create_app
+
     settings = Settings(
         app_env="production",
         database_url=SecretStr("postgresql://production-user:placeholder@localhost/production"),
         supabase_url="https://production-project.supabase.co",
         supabase_jwt_issuer="https://production-project.supabase.co/auth/v1",
-        supabase_jwt_secret=SecretStr("production-placeholder"),
     )
     application = create_app(settings)
 
@@ -75,3 +88,99 @@ def test_unknown_environment_variable_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="extra_forbidden"):
         Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("environment", ["development", "test"])
+def test_local_settings_need_no_service_credentials(
+    environment: str, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APP_ENV", environment)
+
+    settings = Settings()
+
+    assert settings.supabase_url == ""
+    assert settings.supabase_jwks_url == ""
+    assert settings.supabase_jwt_audience == "authenticated"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["DATABASE_URL", "SUPABASE_URL", "SUPABASE_JWT_ISSUER", "SUPABASE_JWT_AUDIENCE"],
+)
+def test_each_production_requirement_is_enforced(missing: str, monkeypatch: MonkeyPatch) -> None:
+    values = {
+        "APP_ENV": "production",
+        "DATABASE_URL": "postgresql://test-user:test-password@localhost/test",
+        "SUPABASE_URL": "https://test-project.supabase.co",
+        "SUPABASE_JWT_ISSUER": "https://test-project.supabase.co/auth/v1",
+        "SUPABASE_JWT_AUDIENCE": "authenticated",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, "" if name == missing else value)
+
+    with pytest.raises(ValueError, match=missing):
+        Settings()
+
+
+def test_jwks_url_is_derived_and_matching_explicit_url_is_accepted() -> None:
+    project = "https://test-project.supabase.co"
+    jwks = f"{project}/auth/v1/.well-known/jwks.json"
+
+    derived = Settings(supabase_url=f"{project}/")
+    explicit = Settings(supabase_url=project, supabase_jwks_url=jwks)
+
+    assert derived.supabase_url == project
+    assert derived.supabase_jwks_url == explicit.supabase_jwks_url == jwks
+
+
+@pytest.mark.parametrize(
+    "project_url",
+    [
+        "http://test-project.supabase.co",
+        "https://test-project.supabase.co/path",
+        "https://test-project.supabase.co?query=value",
+        "https://test-project.supabase.co#fragment",
+        "https://test-user:test-password@test-project.supabase.co",
+        "https://test-project.supabase.co:invalid",
+        "https://test project.supabase.co",
+    ],
+)
+def test_invalid_project_origins_are_rejected(project_url: str) -> None:
+    with pytest.raises(ValueError, match="HTTPS project origin"):
+        Settings(supabase_url=project_url)
+
+
+def test_authentication_endpoints_cannot_target_another_project() -> None:
+    project = "https://test-project.supabase.co"
+
+    with pytest.raises(ValueError, match="SUPABASE_JWT_ISSUER"):
+        Settings(supabase_url=project, supabase_jwt_issuer="https://other.supabase.co/auth/v1")
+    with pytest.raises(ValueError, match="SUPABASE_JWKS_URL"):
+        Settings(supabase_url=project, supabase_jwks_url="https://other.supabase.co/keys")
+    with pytest.raises(ValueError, match="SUPABASE_URL"):
+        Settings(supabase_jwks_url=f"{project}/auth/v1/.well-known/jwks.json")
+
+
+def test_legacy_secret_is_not_used(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", "unused-test-only-value")
+
+    settings = Settings()
+
+    assert "supabase_jwt_secret" not in Settings.model_fields
+    assert "unused-test-only-value" not in repr(settings)
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("SUPABASE_JWT_SECRET=unused-test-only-value\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+
+def test_committed_environment_example_uses_supported_settings() -> None:
+    example = Path(__file__).resolve().parents[1] / ".env.example"
+
+    settings = Settings(_env_file=example)  # type: ignore[call-arg]
+
+    assert settings.app_env == "development"
+    assert settings.supabase_jwks_url == (
+        f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
+    )

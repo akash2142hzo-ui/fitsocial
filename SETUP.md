@@ -59,23 +59,18 @@ The mobile app may contain only publishable configuration. It must never contain
 
 ```text
 APP_ENV=development
-APP_NAME=FitSocial API
-LOG_LEVEL=INFO
-API_PREFIX=/api/v1
 DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/<database>
 SUPABASE_URL=https://project-ref.supabase.co
+SUPABASE_JWKS_URL=https://project-ref.supabase.co/auth/v1/.well-known/jwks.json
 SUPABASE_JWT_ISSUER=https://project-ref.supabase.co/auth/v1
 SUPABASE_JWT_AUDIENCE=authenticated
-SUPABASE_JWT_SECRET=<server-side-validation-secret-or-key-material>
-SUPABASE_SERVICE_ROLE_KEY=<server-side-only-key-if-required>
-SUPABASE_STORAGE_BUCKET=media
-ALLOWED_MEDIA_TYPES=image/jpeg,image/png,image/webp
-MAX_UPLOAD_BYTES=10485760
-CORS_ALLOWED_ORIGINS=http://localhost:8081
-RATE_LIMIT_ENABLED=true
 ```
 
-The exact JWT verification variables depend on the Supabase signing configuration and should be confirmed during implementation. Prefer asymmetric public-key verification when supported by the selected setup. A service-role key is optional and should be avoided unless a server-side operation truly requires it.
+These are the supported backend variables. `SUPABASE_JWKS_URL` is optional: it is derived from `SUPABASE_URL`; if supplied, it must exactly match that project's `/auth/v1/.well-known/jwks.json` endpoint. The project URL must be an HTTPS origin, and `SUPABASE_JWT_ISSUER`, when supplied, must match its `/auth/v1` endpoint. A trailing slash on the project URL is normalized.
+
+Production requires nonempty `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_ISSUER`, and `SUPABASE_JWT_AUDIENCE` (default: `authenticated`). A JWKS URL cannot be configured without the project URL. `SUPABASE_JWT_SECRET` is unsupported and must be removed from local dotenv files. Unrelated process environment variables are ignored; unknown dotenv entries are rejected.
+
+This is configuration validation only. JWT verification, JWKS retrieval/caching, algorithm selection, rate limiting, CORS, media settings, and privileged provider operations are not implemented. Do not add their future environment variables to the current dotenv file. The authentication architecture remains the authority for their later implementation.
 
 ## 6. Test variables
 
@@ -85,13 +80,14 @@ Use an isolated database and test Supabase project or local test doubles:
 APP_ENV=test
 DATABASE_URL=postgresql+psycopg://<test-user>:<test-password>@<test-host>:5432/<test-database>
 SUPABASE_URL=https://test-project-ref.supabase.co
+SUPABASE_JWKS_URL=https://test-project-ref.supabase.co/auth/v1/.well-known/jwks.json
 SUPABASE_JWT_ISSUER=https://test-project-ref.supabase.co/auth/v1
 SUPABASE_JWT_AUDIENCE=authenticated
-SUPABASE_JWT_SECRET=<test-only-secret>
-SUPABASE_SERVICE_ROLE_KEY=<test-only-server-key-if-required>
 ```
 
 Tests must not use production data, production credentials, or a developer's personal account.
+
+Development and test settings can omit all service configuration to run the health-only scaffold offline. `.env` is loaded relative to the backend working directory; `.env.test` is not automatically selected. The unit tests isolate local dotenv files and process configuration. The examples above describe future isolated service configuration, not a requirement to create or contact services now.
 
 ## 7. Secret handling
 
