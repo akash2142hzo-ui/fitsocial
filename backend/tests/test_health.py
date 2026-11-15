@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from pytest import MonkeyPatch
 
 from app.core.config import Settings
@@ -184,3 +184,54 @@ def test_committed_environment_example_uses_supported_settings() -> None:
     assert settings.supabase_jwks_url == (
         f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
     )
+
+
+def test_formatted_field_error_hides_invalid_input(monkeypatch: MonkeyPatch) -> None:
+    invalid_environment = "invalid-environment-synthetic-sensitive-payload"
+    monkeypatch.setenv("APP_ENV", invalid_environment)
+
+    with pytest.raises(ValidationError) as captured:
+        Settings()
+
+    message = str(captured.value)
+    assert "app_env" in message
+    assert invalid_environment not in message
+    assert "input_value=" not in message
+    assert "input_type=" not in message
+
+
+def test_formatted_model_error_hides_credentials_and_payload(monkeypatch: MonkeyPatch) -> None:
+    password = "synthetic-test-only-db-password"
+    database_url = f"postgresql://test-user:{password}@localhost/test"
+    invalid_project = "https://test-project.supabase.co?sensitive=synthetic-private-payload"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("SUPABASE_URL", invalid_project)
+
+    with pytest.raises(ValidationError) as captured:
+        Settings()
+
+    message = str(captured.value)
+    assert "SUPABASE_URL" in message
+    assert "HTTPS project origin" in message
+    assert password not in message
+    assert database_url not in message
+    assert invalid_project not in message
+    assert "synthetic-private-payload" not in message
+    assert "input_value=" not in message
+    assert "input_type=" not in message
+
+
+def test_formatted_dotenv_error_hides_unknown_setting_value(tmp_path: Path) -> None:
+    secret = "synthetic-test-only-unknown-credential"
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"UNEXPECTED_CREDENTIAL={secret}\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError) as captured:
+        Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    message = str(captured.value)
+    assert "unexpected_credential" in message
+    assert "extra_forbidden" in message
+    assert secret not in message
+    assert "input_value=" not in message
+    assert "input_type=" not in message

@@ -59,6 +59,14 @@ Thumbs.db
 # Future iOS generated output
 /mobile/ios/Pods/
 /mobile/ios/build/
+**/xcuserdata/
+*.xcuserstate
+*.mobileprovision
+*.provisionprofile
+
+# Local Supabase CLI metadata (keep migrations and test SQL in source)
+/supabase/.temp/
+/supabase/.branches/
 
 # Private signing material and credential files
 *.pem

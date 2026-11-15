@@ -1,0 +1,19 @@
+{
+  "bundledPhotos": [],
+  "fallback": "Original React Native surfaces, lime accents and geometric shapes; no external image asset.",
+  "candidates": [
+    {
+      "source": "Pexels",
+      "author": "TUBARONES PHOTOGRAPHY",
+      "title": "An Empty Gym",
+      "pageUrl": "https://www.pexels.com/photo/an-empty-gym-9545907/",
+      "downloadUrl": "https://images.pexels.com/photos/9545907/pexels-photo-9545907.jpeg?auto=compress&cs=tinysrgb&w=960",
+      "license": "Pexels License",
+      "licenseUrl": "https://www.pexels.com/license/",
+      "licenseReviewedOn": "2026-11-14",
+      "retrievedOn": null,
+      "status": "Not downloaded or bundled: environment socket access denied (WinError 10013).",
+      "rightsReview": "Page describes an empty gym. Image-level checks for people, logos and trademarks remain pending because download failed. Manual approval requires visual review. No endorsement may be implied."
+    }
+  ]
+}

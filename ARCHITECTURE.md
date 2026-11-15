@@ -6,6 +6,8 @@ FitSocial will use a **modular monolith**: one FastAPI deployable, one PostgreSQ
 
 The mobile app is a React Native application built with Expo and TypeScript. It communicates with the backend over versioned REST APIs. Supabase supplies authentication and object storage; PostgreSQL is the system of record for application data.
 
+V1 uses PostgreSQL in the same Supabase project as Auth. Supabase SQL migrations under `supabase/migrations/` are the sole migration authority. Security-critical state belongs in internal `app_accounts`, separate from profiles. `DATABASE.md` section 12.7 defines the Task 005A first-migration contract, prepared locally only; no database foundation has been applied or verified yet. Broader administrative/write/worker contracts in section 12 remain proposals.
+
 ## 2. Proposed repository structure
 
 ```text
@@ -47,7 +49,6 @@ fitsocial/
 │   │   ├── unit/
 │   │   ├── integration/
 │   │   └── security/
-│   ├── alembic/
 │   ├── pyproject.toml
 │   └── .env.example
 ├── supabase/
@@ -87,7 +88,7 @@ The tree is a proposed target structure, not an instruction to implement all dir
 
 - Owns identity lifecycle, password handling, token issuance, and session refresh.
 - Backend validates JWT signature, issuer, audience, expiry, and subject.
-- Application user profile is linked to the Supabase Auth user ID.
+- An internal application account is linked to the Supabase Auth UUID; profiles are separate. Online token validation does not replace the internal account-state or revocation checks.
 
 ### Supabase Storage
 
@@ -99,7 +100,7 @@ The tree is a proposed target structure, not an instruction to implement all dir
 ## 4. Authorization model
 
 1. Authenticate the request with a Supabase access token.
-2. Load the application user and account state.
+2. Load internal `app_accounts` state by verified subject and perform the primary-database session-revocation check; a missing/non-active account or unavailable check denies access.
 3. Apply object-level authorization in the relevant module.
 4. Apply relationship rules: visibility, follow approval, community membership, block state, and moderation state.
 5. Return only fields allowed for that caller.
@@ -155,8 +156,8 @@ For follower-visible content, the relationship must be an accepted follow at rea
 
 ## 10. Unresolved architecture decisions
 
-- Managed Supabase PostgreSQL versus another PostgreSQL deployment.
-- ORM/query approach and migration ownership between Alembic and Supabase migrations.
+- Database driver/query approach, isolated runtime-role verification, and hosted durability/failover evidence. Same-project Supabase PostgreSQL and Supabase SQL migration ownership are decided.
+- Approval of the detailed roles, grants, helpers, retention and worker contracts proposed in `DATABASE.md` section 12; no competing Alembic history.
 - Background job mechanism for image processing, notifications, and moderation workflows.
 - Error tracking and metrics provider, with a privacy-preserving self-hosted option considered first.
 - Exact media transformations and malware/content scanning approach.

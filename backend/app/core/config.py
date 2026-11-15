@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "staging", "production"] = "development"
     database_url: SecretStr = SecretStr("")
     supabase_url: str = ""
+    supabase_publishable_key: SecretStr = SecretStr("")
     supabase_jwks_url: str = ""
     supabase_jwt_issuer: str = ""
     supabase_jwt_audience: str = "authenticated"
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="forbid",
+        hide_input_in_errors=True,
     )
 
     @model_validator(mode="after")

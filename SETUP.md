@@ -1,8 +1,8 @@
 # Development Setup and Configuration
 
-This document describes the planned development prerequisites. No dependencies or system settings were changed while producing the architecture package.
+This document distinguishes the current local prototype from future service and deployment work. The mobile prototype runs without accounts, a backend connection, persistent storage, or enforced privacy. Backend product authentication and database integration remain planned; the standalone provider validator is not connected to an API route.
 
-## 1. Tool inventory observed
+## 1. Historical tool inventory
 
 | Tool | Observed state | Use |
 |---|---|---|
@@ -13,7 +13,7 @@ This document describes the planned development prerequisites. No dependencies o
 | Docker | Not available | Optional local PostgreSQL/Supabase containers |
 | Android Studio | Not verified | Required for Android SDK, emulator, and native build support |
 
-The project is empty at this stage. Version pinning should be agreed before scaffolding; do not assume the locally installed versions are the support policy.
+This inventory was recorded during architecture planning, not detected at each run. The project is now scaffolded and has automated tests. Current runtime requirements are defined by `.nvmrc`, `mobile/package.json` and `backend/pyproject.toml`: Node 24 and Python 3.13. A separately installed Python 3.14 does not satisfy the backend's declared Python range. Use the existing supported virtual environment rather than assuming the default `python` is suitable.
 
 ## 2. Required installations
 
@@ -22,10 +22,10 @@ The project is empty at this stage. Version pinning should be agreed before scaf
 1. **Node.js LTS and npm** - runs Expo, TypeScript, linting, tests, and package scripts.
 2. **JDK version supported by the selected Expo/React Native release** - required for Android builds.
 3. **Android Studio** - supplies Android SDK, build tools, emulator, and device debugging.
-4. **Android SDK platform/build tools** - exact API level will be pinned when the Expo SDK is selected.
-5. **Python version selected by backend support policy** - runs FastAPI and its tooling.
-6. **PostgreSQL access** - a managed development database or local PostgreSQL; production must not use a developer database.
-7. **Supabase project** - Auth, Storage, and PostgreSQL integration.
+4. **Android SDK platform/build tools** - compile SDK 37 and target SDK 36 are configured in `mobile/app.json`.
+5. **Python 3.13.x** - runs FastAPI and its tooling.
+
+Mobile type/lint/unit checks do not require an Android SDK or a live service. PostgreSQL access and a Supabase project are only needed for separately approved future integration work; they are not prerequisites for the local mobile demo or mocked backend tests. Production must not use a developer database.
 
 ### Useful but optional
 
@@ -33,17 +33,17 @@ The project is empty at this stage. Version pinning should be agreed before scaf
 - A database client such as `psql` for operational inspection.
 - An Android emulator or physical Android device.
 
-Install through official installers and the project package managers. Do not install dependencies globally unless the chosen tool explicitly requires it. Exact package versions belong in `package.json` and `pyproject.toml` after architecture approval.
+Install through official installers and the project package managers only when installation is authorized. Do not install dependencies globally unless the chosen tool explicitly requires it. Dependency ranges are in the manifests; `mobile/package-lock.json` and `backend/requirements.lock` record resolved versions. Do not regenerate them as incidental cleanup.
 
 ## 3. Environment files
 
-Create local files from the examples after scaffolding:
+Optional local files can be created from the examples when service configuration is needed:
 
 - `mobile/.env.local`
 - `backend/.env`
 - `backend/.env.test`
 
-Add all of them to `.gitignore`. Commit only `.env.example` files containing placeholders.
+They are already excluded by `.gitignore`. Commit only `.env.example` files containing placeholders. The current mobile prototype does not consume the future service variables below.
 
 ## 4. Mobile variables
 
@@ -64,13 +64,14 @@ SUPABASE_URL=https://project-ref.supabase.co
 SUPABASE_JWKS_URL=https://project-ref.supabase.co/auth/v1/.well-known/jwks.json
 SUPABASE_JWT_ISSUER=https://project-ref.supabase.co/auth/v1
 SUPABASE_JWT_AUDIENCE=authenticated
+SUPABASE_PUBLISHABLE_KEY=
 ```
 
-These are the supported backend variables. `SUPABASE_JWKS_URL` is optional: it is derived from `SUPABASE_URL`; if supplied, it must exactly match that project's `/auth/v1/.well-known/jwks.json` endpoint. The project URL must be an HTTPS origin, and `SUPABASE_JWT_ISSUER`, when supplied, must match its `/auth/v1` endpoint. A trailing slash on the project URL is normalized.
+These are the supported backend variables. The publishable key is optional for health-only operation and used only by the standalone online provider validator; leave it blank for offline operation. Never use a service-role or secret key. `SUPABASE_JWKS_URL` is optional: it is derived from `SUPABASE_URL`; if supplied, it must exactly match that project's `/auth/v1/.well-known/jwks.json` endpoint. The project URL must be an HTTPS origin, and `SUPABASE_JWT_ISSUER`, when supplied, must match its `/auth/v1` endpoint. A trailing slash on the project URL is normalized.
 
 Production requires nonempty `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_JWT_ISSUER`, and `SUPABASE_JWT_AUDIENCE` (default: `authenticated`). A JWKS URL cannot be configured without the project URL. `SUPABASE_JWT_SECRET` is unsupported and must be removed from local dotenv files. Unrelated process environment variables are ignored; unknown dotenv entries are rejected.
 
-This is configuration validation only. JWT verification, JWKS retrieval/caching, algorithm selection, rate limiting, CORS, media settings, and privileged provider operations are not implemented. Do not add their future environment variables to the current dotenv file. The authentication architecture remains the authority for their later implementation.
+Configuration validation does not itself authenticate requests. The standalone validator delegates token acceptance to the configured provider's fixed HTTPS user endpoint when explicitly invoked, then checks identity/claims; it is not wired into an API route, mobile login or FitSocial authorization. Local cryptographic JWT verification, JWKS retrieval/caching, rate limiting, CORS, media settings and privileged provider operations remain unimplemented. Do not add their future environment variables to the current dotenv file. The authentication architecture remains the authority for later implementation.
 
 ## 6. Test variables
 
@@ -95,11 +96,11 @@ Development and test settings can omit all service configuration to run the heal
 - Use least-privilege keys and rotate them after suspected exposure.
 - Do not print tokens, passwords, signed URLs, or full request bodies in logs.
 - Do not paste secrets into issues, pull requests, documentation, or chat.
-- Add secret scanning to CI before the first application commit.
+- Arrange a reviewed secret scan before publishing repository history; CI integration remains separate work.
 
-## 8. Recommended baseline versions for initial scaffolding
+## 8. Declared project versions
 
-These are the verified baseline for the initial scaffold. The manifests will pin compatible major/minor ranges, while lockfiles will be generated only when dependencies are intentionally installed.
+The current manifests and lockfiles are the source of truth. The following records the project baseline; no package compatibility or security database was contacted for this maintenance task.
 
 - **Expo SDK:** 58
 - **React Native:** 0.88.x, as paired by Expo SDK 58
@@ -109,20 +110,30 @@ These are the verified baseline for the initial scaffold. The manifests will pin
 - **Android compile SDK:** API 37
 - **Android target SDK:** API 36
 - **Python:** 3.13.x
-- **FastAPI:** current stable release compatible with the selected Python version, pinned after scaffolding with its transitive Starlette/Pydantic compatibility
+- **FastAPI:** declared in `backend/pyproject.toml` and pinned in `backend/requirements.lock` with its transitive dependencies
 - **Pydantic:** 2.x, pinned through FastAPI's supported compatibility range
 - **PostgreSQL:** 18.x, using the latest supported minor release available from the chosen provider
-- **TypeScript:** current version supported by the selected Expo SDK, pinned in `mobile/package.json`
+- **TypeScript:** declared in `mobile/package.json` and resolved in `mobile/package-lock.json`
 
-The requested mobile versions are compatible according to the Expo SDK 58 and React Native 0.88 compatibility guidance. Node 24 is newer than the React Native 0.88 minimum and must be validated in CI with the selected Expo tooling. Android compile SDK 37 with target SDK 36 is intentional: compile SDK controls build APIs, while target SDK controls runtime behavior and release policy. Python 3.13 and PostgreSQL 18 are the backend baselines. No dependencies have been installed.
+The installed direct mobile versions match the declared ranges and lockfile. CI and native-device validation remain separate work. Android compile SDK 37 with target SDK 36 is intentional: compile SDK controls build APIs, while target SDK controls runtime behavior and release policy. Python 3.13 is the backend runtime baseline; PostgreSQL 18 remains the architecture target, not evidence of an applied or connected database.
 
-## 9. Local development sequence after approval
+## 9. Current offline checks
 
-1. Pin Node, Expo, React Native, Python, and Android API versions.
-2. Scaffold `mobile/` and `backend/` package manifests.
-3. Create development Supabase project and isolated database.
-4. Add `.env.example` files and configuration validation.
-5. Run migrations and seed only non-sensitive exercise data.
-6. Start the backend and verify liveness/readiness endpoints.
-7. Start Expo and verify authentication against the development project.
-8. Add CI before implementing product modules.
+With the existing dependencies available, run from `mobile/`:
+
+```powershell
+npm.cmd run typecheck
+npm.cmd run lint
+npm.cmd test -- --silent
+```
+
+From `backend/`, using the existing supported environment:
+
+```powershell
+..\.venv\Scripts\python.exe -B -m pytest -p no:cacheprovider
+..\.venv\Scripts\python.exe -B -m ruff check --no-cache app tests
+```
+
+Use the equivalent environment Python path and `npm` launcher on other platforms. Backend tests isolate dotenv settings and use in-process clients/mocked transports; no live credentials or service connection are required. The bootstrap exposes only `/api/v1/health`. A standalone provider validator does not make product authentication available.
+
+Supabase SQL under `supabase/migrations/` is prepared source, not an applied schema. Database connections, migration execution, login integration, emulator/device deployment and CI setup require separate work and authorization. The security architecture documents define the intended future behavior, not production readiness of this local prototype.
