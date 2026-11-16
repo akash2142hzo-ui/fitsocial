@@ -1,12 +1,18 @@
 export const colors = {
-  background: "#111315",
-  surface: "#1B1E21",
-  border: "#343A40",
-  accent: "#C9F270",
-  community: "#C9F270",
-  text: "#F5F7F8",
-  muted: "#ADB5BD",
+  background: "#0E1013",
+  surface: "#171A1F",
+  elevated: "#1F2329",
+  border: "#2A2F37",
+  accent: "#C6F26B",
+  community: "#C6F26B",
+  text: "#F4F6F8",
+  secondaryText: "#A3ABB5",
+  // Compatibility alias: existing captions need readable secondary text.
+  muted: "#A3ABB5",
+  // Reserve for nonessential decoration; not small text on elevated surfaces.
+  mutedText: "#6B7480",
   inputBorder: "#68737C",
   accentSurface: "#263021",
-  error: "#FFB4A9",
+  error: "#FF5C5C",
+  success: "#4ADE80",
 };

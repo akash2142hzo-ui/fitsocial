@@ -7,8 +7,8 @@ export function identityFor(state: SocialState, authorId: string) {
   const author = authors.find((entry) => entry.id === authorId);
   if (!author) return undefined;
   if (authorId === LOCAL_AUTHOR_ID) return { ...author, name: state.localProfile.displayName, username: state.localProfile.username,
-    bio: state.localBio, initials: avatarInitials(state.localProfile), location: state.localProfile.location };
+    bio: state.localBio, initials: avatarInitials(state.localProfile), location: state.localProfile.location, photo: state.localProfile.photo };
   const extension = state.trainers.profiles[authorId];
   return { ...author, name: extension?.displayName ?? author.name, username: extension?.username ?? author.username,
-    bio: extension?.bio ?? author.bio };
+    bio: extension?.bio ?? author.bio, photo: undefined };
 }

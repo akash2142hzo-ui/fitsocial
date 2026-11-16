@@ -1,19 +1,21 @@
 import { validateBodyWeight } from "../workout/workoutMetrics";
 import { authors, LOCAL_AUTHOR_ID } from "./sampleData";
+import { LocalMedia, mediaValidationError } from "./localMedia";
 
 export const profileLimits = { displayName: 50, username: 24, bio: 160, location: 80 } as const;
 export const avatarOptions = ["Initials", "Move", "Strong", "Outdoors"] as const;
 export type AvatarChoice = typeof avatarOptions[number];
-export type LocalProfile = { displayName: string; username: string; location: string; avatar: AvatarChoice };
+export type LocalProfile = { displayName: string; username: string; location: string; avatar: AvatarChoice; photo?: LocalMedia | null };
 export type FitnessPreferences = { heightCm: string; bodyWeightKg: string; units: "Metric" };
 export type FutureVisibility = "Not set" | "Public" | "Private";
 export type SettingsValues = LocalProfile & FitnessPreferences & { bio: string; futureVisibility: FutureVisibility };
-export type SettingsDraft = { section: "profile" | "fitness" | "privacy"; original: SettingsValues; values: SettingsValues; error: string | null; confirming: boolean };
+export type SettingsDraft = { section: "profile" | "fitness" | "privacy"; original: SettingsValues; values: SettingsValues; error: string | null; confirming: boolean; photoPending?: string; photoUnavailableId?: string };
 const persona = authors.find((author) => author.id === LOCAL_AUTHOR_ID)!;
-export const initialProfile: LocalProfile = { displayName: persona.name, username: persona.username, location: "", avatar: "Initials" };
+export const initialProfile: LocalProfile = { displayName: persona.name, username: persona.username, location: "", avatar: "Initials", photo: null };
 export const initialFitness: FitnessPreferences = { heightCm: "", bodyWeightKg: "", units: "Metric" };
 export function settingsDirty(draft: SettingsDraft | null): boolean {
-  return !!draft && (Object.keys(draft.values) as (keyof SettingsValues)[]).some((key) => draft.values[key] !== draft.original[key]);
+  return !!draft && ((draft.values.photo ?? null) !== (draft.original.photo ?? null)
+    || (Object.keys(draft.values) as (keyof SettingsValues)[]).some((key) => key !== "photo" && draft.values[key] !== draft.original[key]));
 }
 export function validateSettings(draft: SettingsDraft, reservedUsernames: readonly string[]): string | null {
   const value = draft.values;
@@ -26,6 +28,8 @@ export function validateSettings(draft: SettingsDraft, reservedUsernames: readon
     if (!/^[a-zA-Z0-9_]{3,24}$/.test(value.username.trim())) return "Use 3–24 letters, numbers or underscores for your username.";
     if (reservedUsernames.some((name) => name.toLowerCase() === value.username.trim().toLowerCase())) return "That demo username is already used.";
     if (!avatarOptions.includes(value.avatar)) return "Choose an available avatar.";
+    if (value.photo && (value.photo.kind !== "photo" || mediaValidationError(value.photo))) return "Choose another profile photo or remove it.";
+    if (value.photo && draft.photoUnavailableId === value.photo.id) return "Profile photo is unavailable. Remove it or choose another photo.";
   } else if (draft.section === "privacy") {
     if (!["Not set", "Public", "Private"].includes(value.futureVisibility)) return "Choose an available future account preference.";
   } else {

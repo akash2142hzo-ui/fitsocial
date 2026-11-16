@@ -1,0 +1,78 @@
+{
+  "chest": {
+    "source": "../../photos/chest.jpg",
+    "sourceSize": [
+      2943,
+      4096
+    ],
+    "cropBox": [
+      1,
+      700,
+      2941,
+      2464
+    ],
+    "preparedSize": [
+      800,
+      480
+    ],
+    "sourceSha256": "1cb5d96428f9c6750407c1fe302081c3cf0db14353fbe751e6a0182f4f7e8363",
+    "preparedSha256": "4affa6601fe82e362b93feb7e871dac7857514bac6ae6649bd363c8deb96ec81"
+  },
+  "back": {
+    "source": "../../photos/back.jpg",
+    "sourceSize": [
+      2648,
+      4006
+    ],
+    "cropBox": [
+      1,
+      1100,
+      2646,
+      2687
+    ],
+    "preparedSize": [
+      800,
+      480
+    ],
+    "sourceSha256": "dec4aa9bd0af7eb5a1fbea494823ba4b5176776020a1c253409a2ccadef8fa94",
+    "preparedSha256": "4a91cbd786d2f4be6a7d072027417ed84f2f178dbf90acb5dd2e5033bde10027"
+  },
+  "biceps": {
+    "source": "../../photos/biceps.jpg",
+    "sourceSize": [
+      2681,
+      4096
+    ],
+    "cropBox": [
+      0,
+      700,
+      2680,
+      2308
+    ],
+    "preparedSize": [
+      800,
+      480
+    ],
+    "sourceSha256": "e499297ba107feb69b0c664b75d5b5249b5c6a9e1153e72f87cfa82fc844270e",
+    "preparedSha256": "876387487bc4a694e89205131d6d06444cdac71c0a81a5766450aba9eebd4d26"
+  },
+  "triceps": {
+    "source": "../../photos/triceps.jpg",
+    "sourceSize": [
+      2667,
+      4096
+    ],
+    "cropBox": [
+      1,
+      950,
+      2666,
+      2549
+    ],
+    "preparedSize": [
+      800,
+      480
+    ],
+    "sourceSha256": "3c7337d09ea229b7a7e6ad9e7dd03a5a0bcf4df1137882668dfb6b21599d3731",
+    "preparedSha256": "3c2d443af93ce73bdf090b2d16dfb859444af09f0c464bea4842cefb237aee8d"
+  }
+}

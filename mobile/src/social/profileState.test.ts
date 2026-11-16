@@ -60,7 +60,7 @@ describe("temporary personal profiles", () => {
     const opened = reduce(empty, { type: "openComposer" });
     const drafted = reduce(opened, { type: "editPost", text: "Keep this" });
     expect(reduce(drafted, { type: "openComposer" })).toBe(drafted);
-    expect(navigationReducer({ screen: "prototype", tab: "home" }, { type: "selectTab", tab: "create" })).toEqual({ screen: "prototype", tab: "create" });
+    expect(navigationReducer({ screen: "prototype", tab: "home" }, { type: "selectTab", tab: "create" })).toEqual({ screen: "prototype", tab: "create", parentTab: "home", backStack: [{ tab: "home" }] });
   });
   it("keeps applied bio edits and follows when unrelated post drafts are discarded", () => {
     let state = reduce(createInitialSocialState(), { type: "editBio", text: "Applied locally" });

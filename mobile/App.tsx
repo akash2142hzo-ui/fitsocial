@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { BackHandler } from "react-native";
 
 import { PrototypeNavigator } from "./src/navigation/PrototypeNavigator";
-import { initialNavigation, navigationReducer, selectedPrimaryTab } from "./src/navigation/navigationState";
+import { FeedSection, initialNavigation, navigationReducer, selectedPrimaryTab } from "./src/navigation/navigationState";
 import { WelcomeScreen } from "./src/screens/WelcomeScreen";
 import { initialWorkout, WorkoutAction, workoutReducer } from "./src/workout/workoutState";
 import { settingsDirty } from "./src/social/settingsState";
@@ -10,11 +10,14 @@ import { createInitialSocialState, hasSocialDraft, publishedWorkoutPost, socialR
 import { backIntent, exitIntent } from "./src/social/navigationSafety";
 import { findShareableWorkout } from "./src/workout/workoutSharing";
 import { authors, LOCAL_AUTHOR_ID } from "./src/social/sampleData";
+import { useMediaCleanup } from "./src/social/useMediaCleanup";
 
 export default function App() {
   const [navigation, dispatch] = useReducer(navigationReducer, initialNavigation);
+  const [feedSection, setFeedSection] = useState<FeedSection>("forYou");
   const [workout, sendWorkout] = useReducer(workoutReducer, initialWorkout);
   const [social, sendSocial] = useReducer(socialReducer, undefined, createInitialSocialState);
+  useMediaCleanup(social);
   const pendingSettingsNavigation = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!social.settingsDraft && pendingSettingsNavigation.current) {
@@ -57,6 +60,7 @@ export default function App() {
   function shareWorkout(id: number) {
     const completed = workout.completed?.id === id ? workout.completed : findShareableWorkout(workout.history, id);
     if (!completed || publishedWorkoutPost(social, id)) return;
+    setFeedSection("forYou");
     sendSocial({ type: "shareWorkout", workout: completed });
     dispatch({ type: "selectTab", tab: "create" });
   }
@@ -64,6 +68,7 @@ export default function App() {
   function requestExit() {
     const intent = exitIntent({ socialDraft, socialConfirming, workoutActive: (workout.status === "active" || (workout.completed !== null && !workout.saved)), workoutConfirming: workout.confirming });
     if (intent === "confirmSocial") {
+      setFeedSection("forYou");
       dispatch({ type: "selectTab", tab: "create" });
       sendSocial({ type: "requestDiscard", target: "all" });
     } else if (intent === "confirmWorkout") {
@@ -76,6 +81,10 @@ export default function App() {
     if (navigation.screen !== "prototype") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (navigation.tab === "settings") { settingsBack(); return true; }
+      if (navigation.tab === "create" && socialConfirming) {
+        sendSocial({ type: "cancelDiscard" });
+        return true;
+      }
       if (social.trainers.disabling && (navigation.tab === "profile" || navigation.tab === "author" && navigation.authorId === LOCAL_AUTHOR_ID)) {
         sendSocial({ type: "trainer", action: { type: "cancelDisable", authorId: LOCAL_AUTHOR_ID } });
         return true;
@@ -84,9 +93,11 @@ export default function App() {
         dispatch({ type: "back" });
         return true;
       }
+      if (navigation.tab === "feed" && feedSection !== "forYou") { setFeedSection("forYou"); return true; }
       const intent = backIntent({ socialDraft, socialConfirming, workoutActive: (workout.status === "active" || (workout.completed !== null && !workout.saved)), workoutConfirming: workout.confirming });
       if (intent === "cancelSocial") sendSocial({ type: "cancelDiscard" });
       else if (intent === "confirmSocial") {
+        setFeedSection("forYou");
         dispatch({ type: "selectTab", tab: "create" });
         sendSocial({ type: "requestDiscard", target: "all" });
       } else if (intent === "confirmWorkout" || intent === "cancelWorkout") {
@@ -96,24 +107,33 @@ export default function App() {
       return true;
     });
     return () => subscription.remove();
-  }, [navigation, workout.status, workout.completed, workout.saved, workout.confirming, socialDraft, socialConfirming, social.trainers.disabling, settingsBack]);
+  }, [navigation, feedSection, workout.status, workout.completed, workout.saved, workout.confirming, socialDraft, socialConfirming, social.trainers.disabling, settingsBack]);
 
   return navigation.screen === "welcome" ? (
     <WelcomeScreen onExplorePrototype={() => dispatch({ type: "openPrototype" })} />
   ) : (
     <PrototypeNavigator
       activeTab={navigation.tab}
+      feedSection={feedSection}
+      onSelectFeedSection={setFeedSection}
+      navigationDepth={navigation.backStack?.length ?? 0}
       authorId={navigation.authorId}
       selectedTab={selectedPrimaryTab(navigation)}
       canGoBack={!!navigation.backStack?.length}
-      onGoBack={() => { if (navigation.tab === "settings") settingsBack(); else dispatch({ type: "back" }); }}
+      onGoBack={() => {
+        if (navigation.tab === "settings") settingsBack();
+        else if (navigation.tab === "create" && socialConfirming) sendSocial({ type: "cancelDiscard" });
+        else dispatch({ type: "back" });
+      }}
       onOpenAuthor={(authorId) => {
         if (authors.some((author) => author.id === authorId)) guardSettings(() => dispatch({ type: "openAuthor", authorId }));
       }}
       onSelectTab={(tab) => {
         guardSettings(() => {
           if (socialConfirming) sendSocial({ type: "cancelDiscard" });
-          if (tab === "create") sendSocial({ type: "openComposer" });
+          if (navigation.tab === "feed" && (tab === "trainers" || tab === "groups")) { setFeedSection(tab); return; }
+          if (tab === "feed" && navigation.tab === "create") setFeedSection("forYou");
+          if (tab === "create") { setFeedSection("forYou"); sendSocial({ type: "openComposer" }); }
           dispatch({ type: "selectTab", tab });
         });
       }}

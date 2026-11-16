@@ -1,0 +1,192 @@
+{
+  "chest": {
+    "source": "../photos/chest.jpg",
+    "sourceSize": [
+      2943,
+      4096
+    ],
+    "cropBox": [
+      0,
+      0,
+      2943,
+      3000
+    ],
+    "preparedSize": [
+      753,
+      768
+    ],
+    "sourceSha256": "1cb5d96428f9c6750407c1fe302081c3cf0db14353fbe751e6a0182f4f7e8363",
+    "preparedSha256": "14c79838a730fd79f4cf9824fd486d8705711c41c775e96179c7e6f2166ac82a"
+  },
+  "back": {
+    "source": "../photos/back.jpg",
+    "sourceSize": [
+      2648,
+      4006
+    ],
+    "cropBox": [
+      0,
+      0,
+      2648,
+      2800
+    ],
+    "preparedSize": [
+      726,
+      768
+    ],
+    "sourceSha256": "dec4aa9bd0af7eb5a1fbea494823ba4b5176776020a1c253409a2ccadef8fa94",
+    "preparedSha256": "eeae45ca479115cfd821f6666ebd909eca4ed3a6f408652c31e108b99624a487"
+  },
+  "shoulders": {
+    "source": "../photos/shoulders.jpg",
+    "sourceSize": [
+      3040,
+      4094
+    ],
+    "cropBox": [
+      0,
+      0,
+      3040,
+      2850
+    ],
+    "preparedSize": [
+      768,
+      720
+    ],
+    "sourceSha256": "80bbf413a0b76a3fff216d984862b97158ad95fd5662bd0355be68b067d5fb51",
+    "preparedSha256": "e069f0e751c42af8b580b155769b45cf9e72729c6895d018a7ac0a8e23659b9c"
+  },
+  "biceps": {
+    "source": "../photos/biceps.jpg",
+    "sourceSize": [
+      2681,
+      4096
+    ],
+    "cropBox": [
+      0,
+      0,
+      2681,
+      2900
+    ],
+    "preparedSize": [
+      710,
+      768
+    ],
+    "sourceSha256": "e499297ba107feb69b0c664b75d5b5249b5c6a9e1153e72f87cfa82fc844270e",
+    "preparedSha256": "6c69da55b4998fa2e02c2af1a20ff0c49388c030fcf1d34ec39addbfa5be062f"
+  },
+  "triceps": {
+    "source": "../photos/triceps.jpg",
+    "sourceSize": [
+      2667,
+      4096
+    ],
+    "cropBox": [
+      0,
+      0,
+      2667,
+      3000
+    ],
+    "preparedSize": [
+      683,
+      768
+    ],
+    "sourceSha256": "3c7337d09ea229b7a7e6ad9e7dd03a5a0bcf4df1137882668dfb6b21599d3731",
+    "preparedSha256": "e249c3621be12c2465d5ac7503377beece3fbe1ab74082afb0f9df7b56e9dd5f"
+  },
+  "forearms": {
+    "source": "../photos/forearms.jpg",
+    "sourceSize": [
+      2633,
+      4096
+    ],
+    "cropBox": [
+      100,
+      0,
+      2633,
+      3500
+    ],
+    "preparedSize": [
+      556,
+      768
+    ],
+    "sourceSha256": "dda8fd09243aec698eb8b08c8b55ea3fe61ec9257afc116cb5b9526a25682944",
+    "preparedSha256": "f7df99036bb3f510d742d3182bb7352d156636b59a2107b14a9d33d58566b70c"
+  },
+  "legs": {
+    "source": "../photos/legs.jpg",
+    "sourceSize": [
+      2884,
+      3898
+    ],
+    "cropBox": [
+      180,
+      0,
+      2700,
+      3330
+    ],
+    "preparedSize": [
+      581,
+      768
+    ],
+    "sourceSha256": "913e4449a454748ee09dc32b8e0c4028487a12094d207655259f0c51242584c5",
+    "preparedSha256": "c62274b3a575df52161460a316ec570275143941c64a9a659cb97bc97916836e"
+  },
+  "cardio": {
+    "source": "../photos/cardio.jpg",
+    "sourceSize": [
+      2736,
+      4026
+    ],
+    "cropBox": [
+      100,
+      120,
+      2600,
+      3400
+    ],
+    "preparedSize": [
+      585,
+      768
+    ],
+    "sourceSha256": "6ef74a52a73db923bff256a4acd8740826843a358d99978f0a3060158a334aea",
+    "preparedSha256": "91715d47dfde5f5309528d7057194ef64c204a11608d5dc2ad20dc82da597ca5"
+  },
+  "abs": {
+    "source": "../photos/abs.jpg",
+    "sourceSize": [
+      2833,
+      4096
+    ],
+    "cropBox": [
+      0,
+      0,
+      2833,
+      2900
+    ],
+    "preparedSize": [
+      750,
+      768
+    ],
+    "sourceSha256": "78a1ca295d79b7fa7a25eeaeb612294a34087d51fe0e947360d2dbcc6b3f0cd4",
+    "preparedSha256": "358986e2e9cd19fedac22f0c00d27bff2307d564543571e031748ec880fb9305"
+  },
+  "full_body": {
+    "source": "../photos/full_body.jpg",
+    "sourceSize": [
+      2664,
+      4096
+    ],
+    "cropBox": [
+      480,
+      0,
+      2230,
+      3040
+    ],
+    "preparedSize": [
+      442,
+      768
+    ],
+    "sourceSha256": "fd39f0dfc8d68ed1fd9aac151478dc99087fbd39a123cc08ad44776b208c9cca",
+    "preparedSha256": "74f416188a8eb2c30b43e9dc42d2a2edc44446d1adcc96274b8fe6885d2f1167"
+  }
+}

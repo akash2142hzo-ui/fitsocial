@@ -1,6 +1,44 @@
 {
   "bundledPhotos": [],
-  "fallback": "Original React Native surfaces, lime accents and geometric shapes; no external image asset.",
+  "retainedPhotos": [
+    {
+      "filename": "photos/home-gym-hero.jpg",
+      "width": 1600,
+      "height": 1000,
+      "source": "Original AI-generated FitSocial concept assets supplied by the project owner",
+      "usage": "Former Home hero background; retained locally, not referenced by active UI after Task 028A",
+      "provenanceLimitations": "Owner-supplied provenance; generating tool, model, original generation record and applicable terms were not independently verified.",
+      "redistributionAndCommercialUseTermsRequireConfirmation": true
+    },
+    {
+      "filename": "photos/strength-equipment.jpg",
+      "width": 960,
+      "height": 640,
+      "source": "Original AI-generated FitSocial concept assets supplied by the project owner",
+      "usage": "Former strength category background; retained locally, not referenced by active UI after Task 028A",
+      "provenanceLimitations": "Owner-supplied provenance; generating tool, model, original generation record and applicable terms were not independently verified.",
+      "redistributionAndCommercialUseTermsRequireConfirmation": true
+    },
+    {
+      "filename": "photos/cardio-equipment.jpg",
+      "width": 960,
+      "height": 640,
+      "source": "Original AI-generated FitSocial concept assets supplied by the project owner",
+      "usage": "Former Cardio category background; retained locally, not referenced by active UI after Task 028A",
+      "provenanceLimitations": "Owner-supplied provenance; generating tool, model, original generation record and applicable terms were not independently verified.",
+      "redistributionAndCommercialUseTermsRequireConfirmation": true
+    }
+  ],
+  "fallback": "Home has no decorative illustration. Active categories use original muscle-specific text fallbacks in MuscleLabel.tsx; exercise rows use catalog muscle and equipment labels. No unverified photos used.",
+  "localIllustrations": {
+    "files": [
+      "src/components/TrainingIllustration.tsx",
+      "src/components/SettingsIcon.tsx",
+      "src/components/MuscleLabel.tsx"
+    ],
+    "source": "Original locally authored React Native View geometry for FitSocial; no external artwork, package, font, image or animation downloaded",
+    "usage": "Muscle-specific text tiles in active picker; retained gym geometry is not used on Home or in picker. Settings uses an in-flow icon."
+  },
   "candidates": [
     {
       "source": "Pexels",

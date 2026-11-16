@@ -1,18 +1,20 @@
 # Mobile prototype
 
 This Expo/React Native app opens on the dark FitSocial welcome screen. Choose
-**Explore the local demo** to use five tabs: Home, Train, Create, Feed, and
-Profile. Progress is accessible from Home and Profile; Groups from Feed and
-Profile. Sample content is labeled separately from local workout and social entries.
+**Explore the local demo** to use five tabs: Home, Train, Rewards, Feed, and
+Profile. Create Post opens from existing Home, Feed and Profile actions. Progress
+is accessible from Home and Profile; Groups from Feed and Profile. Sample content
+is labeled separately from local workout and social entries.
 
 Navigation uses in-memory React state with the existing dependencies. Android
 Back returns secondary screens to their entry tab, then through Home to welcome.
 Active workouts and unfinished drafts require confirmation before disposal.
 Reopening the demo starts at Home.
 
-The demo does not sign anyone in, persist data, or make backend calls. Workout
+The demo does not sign anyone in, persist session state, or make backend calls. Workout
 logging and social interactions run in memory. Authentication remains a disabled
 placeholder. Reloading or closing the process may clear all entries.
+Selected media uses disposable native cache files rather than permanent storage.
 
 The mobile package targets Node.js 24 LTS, Expo SDK 58, React Native 0.88.x, React 19.3.x, Android compile SDK 37, and target SDK 36.
 
@@ -50,17 +52,31 @@ equipment and exercise picker; Biceps, Triceps and Forearms are separate discove
 categories, with explicit supplementary associations and unchanged catalog IDs.
 Calorie information explains the existing estimate and its limitations.
 
-Feed provides For You, Following and My Posts with in-memory search. Fictional
-examples remain labeled, and locally published posts retain real workout snapshots.
-Drafts, pending shares and publication duplicate guards remain session-only.
-Trainers and Groups are secondary destinations, not additional bottom tabs.
+Feed provides For You, Trainers and Groups, with in-memory post search. Home
+can filter its shared post cards to followed authors. Fictional examples remain
+labeled; published local posts can include text, sample achievements, workout
+snapshots and one local photo/video attachment. Drafts, sharing previews and
+publication duplicate guards remain session-only. No messages or online publishing
+are implemented.
 
-Profile separates Posts / Followers / Following from fitness Progress. Its gear
-opens Settings for local identity, letter avatars, measurements and a future account
-visibility preference. Public/Private has no enforcement effect and publishes
-nothing online. Personal weight can default into new workouts; active session
-overrides and historical estimates stay unchanged. Imperial units, photo uploads,
-login and notifications remain unavailable; no new device permission is requested.
+Rewards shows a sample FitPoints balance, reward and product previews and planned
+earning explanations. Earning, redemption, checkout and purchases are unavailable.
+
+Profile includes local social counts, a static demo level, quick access to Progress,
+Groups, Drafts and Trainer management, and shared My Posts. Its gear opens grouped
+Settings and existing local identity, measurement and future privacy-preference
+editors. Gallery/camera profile photos are cache-backed local previews; removing a
+photo restores the existing letter-avatar fallback. Profile photo changes commit
+only on Save. The preset-avatar selection strip is no longer exposed.
+
+Camera permission is requested only after a capture action; gallery selection uses
+the system picker without a broad storage request. Photo/video references can
+expire, and no media is uploaded or permanently persisted. Public/Private remains
+a future preference with no access-control enforcement. Measurements are metric;
+Train independently supports kg/lb weight entry/display. Authentication and
+notifications are unavailable. Native picker/crop/video/keyboard behavior still
+requires physical-device QA; see TASK_043B_VERIFICATION.md for the awaited-copy
+and content-URI regression evidence.
 
 See [Task 023B](TASK_023B_VERIFICATION.md), [Task 023C](TASK_023C_VERIFICATION.md),
 [Task 023D](TASK_023D_VERIFICATION.md) and [Task 024A](TASK_024A_VERIFICATION.md)

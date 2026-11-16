@@ -5,13 +5,14 @@ import { achievements, authors, groups, LOCAL_AUTHOR_ID, sampleComments, sampleL
 import { CompletedWorkout } from "../workout/workoutState";
 import { createWorkoutAttachment, WorkoutAttachment } from "../workout/workoutSharing";
 import { identityFor } from "./trainerIdentity";
+import { LocalMedia, mediaValidationError } from "./localMedia";
 
 export const COMMENT_LIMIT = 300;
 export const MAX_COMMENTS_PER_POST = 100;
 export const POST_LIMIT = 500;
 export const MAX_LOCAL_POSTS = 50;
 export const BIO_LIMIT = 160;
-export type Composer = { id: string; text: string; achievementId: string | null; workout: WorkoutAttachment | null; error: string | null };
+export type Composer = { id: string; text: string; achievementId: string | null; workout: WorkoutAttachment | null; error: string | null; media?: LocalMedia; mediaPending?: string };
 type CommentDraft = { text: string; error: string | null };
 export type FeedFilter = "all" | "following" | "local";
 export type SocialState = {
@@ -55,7 +56,12 @@ export function createInitialSocialState(): SocialState {
 }
 export type SocialAction =
   | { type: "openSettingsEditor"; section: SettingsDraft["section"] }
-  | { type: "editSettings"; field: keyof SettingsValues; value: string }
+  | { type: "editSettings"; field: Exclude<keyof SettingsValues, "photo">; value: string }
+  | { type: "beginProfilePhoto"; token: string }
+  | { type: "finishProfilePhoto"; token: string; photo?: LocalMedia; error?: string }
+  | { type: "removeProfilePhoto" }
+  | { type: "profilePhotoError"; error: string; photoId?: string }
+  | { type: "profilePhotoAvailable"; photoId: string }
   | { type: "saveSettings" | "closeSettingsEditor" | "confirmSettingsDiscard" | "keepSettingsEditing" }
   | { type: "trainer"; action: TrainerAction }
   | { type: "toggleLike" | "toggleComments"; postId: string }
@@ -68,6 +74,10 @@ export type SocialAction =
   | { type: "saveDraft" | "openDrafts" | "continueComposer" | "newTextDraft" }
   | { type: "resumeDraft" | "requestDiscardDraft"; id: string }
   | { type: "editPost"; text: string }
+  | { type: "beginMedia"; draftId: string; token: string }
+  | { type: "finishMedia"; draftId: string; token: string; media?: LocalMedia; error?: string }
+  | { type: "removeMedia"; draftId: string }
+  | { type: "mediaUnavailable"; id: string }
   | { type: "selectAchievement"; achievementId: string | null }
   | { type: "publishPost"; version: number; at: number }
   | { type: "requestDiscard"; target: "composer" | "all" }
@@ -121,6 +131,18 @@ export function publishedWorkoutPost(state: SocialState, workoutId: number) {
 export function workoutDraft(state: SocialState, workoutId: number) {
   return [state.composer, ...state.drafts].find((draft) => draft?.workout?.workoutId === workoutId) ?? undefined;
 }
+// Shared by the publish reducer and the disabled state of the composer action.
+export function postValidationError(state: SocialState): string | null {
+  if (!state.composer) return "Open a post draft first.";
+  if (state.composer.mediaPending) return "Wait for media selection to finish.";
+  if (state.composer.media) {
+    const error = mediaValidationError(state.composer.media);
+    if (error) return error;
+  }
+  return ((state.composer.workout || state.composer.media) && !state.composer.text.trim() && state.composer.text.length <= POST_LIMIT
+        ? null : validateSocialText(state.composer.text, POST_LIMIT, "a post"))
+        ?? (state.posts.filter((post) => post.origin === "local").length >= MAX_LOCAL_POSTS ? "This demo has reached its 50-post limit." : null);
+}
 export function socialReducer(state: SocialState, action: SocialAction): SocialState {
   if (state.discardPrompt && action.type !== "cancelDiscard" && action.type !== "confirmDiscard") return state;
   switch (action.type) {
@@ -135,20 +157,49 @@ export function socialReducer(state: SocialState, action: SocialAction): SocialS
       const profileFields = ["displayName", "username", "bio", "location", "avatar"];
       const allowed = draft.section === "profile" ? profileFields : draft.section === "fitness" ? ["heightCm", "bodyWeightKg", "units"] : ["futureVisibility"];
       if (!allowed.includes(action.field)) return state;
-      return update(state, { settingsDraft: { ...draft, values: { ...draft.values, [action.field]: action.value }, error: null } });
+      return update(state, { settingsDraft: { ...draft, values: { ...draft.values, [action.field]: action.value, ...(action.field === "avatar" ? { photo: null } : {}) }, ...(action.field === "avatar" ? { photoPending: undefined, photoUnavailableId: undefined } : {}), error: null } });
     }
-    case "confirmSettingsDiscard": return state.settingsDraft ? update(state, { settingsDraft: { ...state.settingsDraft, confirming: true } }) : state;
+    case "beginProfilePhoto": {
+      const draft = state.settingsDraft;
+      if (draft?.section !== "profile" || draft.confirming || draft.photoPending) return state;
+      return update(state, { settingsDraft: { ...draft, photoPending: action.token, error: null } });
+    }
+    case "finishProfilePhoto": {
+      const draft = state.settingsDraft;
+      if (draft?.section !== "profile" || draft.confirming || draft.photoPending !== action.token) return state;
+      const valid = action.photo?.kind === "photo" && !mediaValidationError(action.photo);
+      return update(state, { settingsDraft: { ...draft, photoPending: undefined, ...(valid ? { photoUnavailableId: undefined } : {}),
+        values: valid ? { ...draft.values, photo: action.photo } : draft.values,
+        error: action.error ?? (action.photo && !valid ? "Choose a supported profile photo." : null) } });
+    }
+    case "removeProfilePhoto": {
+      const draft = state.settingsDraft;
+      if (draft?.section !== "profile" || draft.confirming) return state;
+      return update(state, { settingsDraft: { ...draft, values: { ...draft.values, photo: null }, photoPending: undefined, photoUnavailableId: undefined, error: null } });
+    }
+    case "profilePhotoError": {
+      const draft = state.settingsDraft;
+      if (draft?.section !== "profile" || draft.confirming || action.photoId && draft.values.photo?.id !== action.photoId) return state;
+      return update(state, { settingsDraft: { ...draft, error: action.error, ...(action.photoId ? { photoUnavailableId: action.photoId } : {}) } });
+    }
+    case "profilePhotoAvailable": {
+      const draft = state.settingsDraft;
+      if (draft?.section !== "profile" || draft.confirming || draft.values.photo?.id !== action.photoId || draft.photoUnavailableId !== action.photoId) return state;
+      return update(state, { settingsDraft: { ...draft, photoUnavailableId: undefined,
+        error: draft.error?.startsWith("Profile photo is unavailable.") ? null : draft.error } });
+    }
+    case "confirmSettingsDiscard": return state.settingsDraft ? update(state, { settingsDraft: { ...state.settingsDraft, confirming: true, photoPending: undefined } }) : state;
     case "keepSettingsEditing": return state.settingsDraft ? update(state, { settingsDraft: { ...state.settingsDraft, confirming: false } }) : state;
     case "closeSettingsEditor": return update(state, { settingsDraft: null });
     case "saveSettings": {
       const draft = state.settingsDraft;
-      if (!draft || draft.confirming) return state;
+      if (!draft || draft.confirming || draft.photoPending) return state;
       const error = validateSettings(draft, authors.filter((author) => author.id !== LOCAL_AUTHOR_ID).map((author) => state.trainers.profiles[author.id]?.username ?? author.username));
       if (error) return update(state, { settingsDraft: { ...draft, error } });
       const value = draft.values;
       if (draft.section === "privacy") return update(state, { futureVisibility: value.futureVisibility, settingsDraft: null });
       if (draft.section === "fitness") return update(state, { fitness: { heightCm: value.heightCm.trim(), bodyWeightKg: value.bodyWeightKg.trim(), units: "Metric" }, settingsDraft: null });
-      const localProfile = { displayName: value.displayName.trim(), username: value.username.trim(), location: value.location.trim(), avatar: value.avatar };
+      const localProfile = { displayName: value.displayName.trim(), username: value.username.trim(), location: value.location.trim(), avatar: value.avatar, photo: value.photo ?? null };
       const profile = state.trainers.profiles[LOCAL_AUTHOR_ID];
       return update(state, { localProfile, localBio: value.bio.trim(), settingsDraft: null,
         trainers: profile ? { ...state.trainers, profiles: { ...state.trainers.profiles, [LOCAL_AUTHOR_ID]: { ...profile, displayName: localProfile.displayName, username: localProfile.username, location: localProfile.location, bio: value.bio.trim() } } } : state.trainers });
@@ -192,10 +243,11 @@ export function socialReducer(state: SocialState, action: SocialAction): SocialS
         ? [...state.joinedGroupIds, action.groupId]
         : state.joinedGroupIds.filter((id) => id !== action.groupId) });
     }
-    case "openDrafts": return update(state, { viewingDrafts: true, shareNotice: null });
+    case "openDrafts": return update(state, { viewingDrafts: true, shareNotice: null,
+      ...(state.composer ? { composer: { ...state.composer, mediaPending: undefined } } : {}) });
     case "continueComposer": return state.composer ? update(state, { viewingDrafts: false, shareNotice: null }) : state;
     case "saveDraft":
-      if (!state.composer) return state;
+      if (!state.composer || state.composer.mediaPending) return state;
       return update(state, { drafts: [...state.drafts.filter((draft) => draft.id !== state.composer!.id), { ...state.composer, error: null }],
         composer: null, viewingDrafts: true, shareNotice: null });
     case "resumeDraft": {
@@ -219,19 +271,39 @@ export function socialReducer(state: SocialState, action: SocialAction): SocialS
           nextDraftId: state.nextDraftId + 1, viewingDrafts: false, shareNotice: null });
     case "editPost":
       return state.composer ? update(state, { composer: { ...state.composer, text: action.text, error: null } }) : state;
+    case "beginMedia":
+      return state.composer?.id === action.draftId && !state.composer.mediaPending && !state.viewingDrafts
+        ? update(state, { composer: { ...state.composer, mediaPending: action.token, error: null } }) : state;
+    case "finishMedia": {
+      const composer = state.composer;
+      if (!composer || composer.id !== action.draftId || composer.mediaPending !== action.token) return state;
+      const error = action.media ? mediaValidationError(action.media) : action.error;
+      return update(state, { composer: { ...composer, mediaPending: undefined, error: error ?? null,
+        ...(!error && action.media ? { media: { ...action.media } } : {}) } });
+    }
+    case "removeMedia":
+      return state.composer?.id === action.draftId && !state.composer.mediaPending
+        ? update(state, { composer: { ...state.composer, media: undefined, error: null } }) : state;
+    case "mediaUnavailable": {
+      const mark = (media: LocalMedia | undefined) => media?.id === action.id ? { ...media, unavailable: true } : media;
+      const entries = [state.composer, ...state.drafts, ...state.posts];
+      if (!entries.some((entry) => entry?.media?.id === action.id && !entry.media.unavailable)) return state;
+      return update(state, { composer: state.composer ? { ...state.composer, media: mark(state.composer.media) } : null,
+        drafts: state.drafts.map((draft) => ({ ...draft, media: mark(draft.media) })),
+        posts: state.posts.map((post) => ({ ...post, media: mark(post.media) })) });
+    }
     case "selectAchievement":
       if (!state.composer || state.composer.workout || (action.achievementId !== null && !achievements.some((entry) => entry.id === action.achievementId))) return state;
       return update(state, { composer: { ...state.composer, achievementId: action.achievementId, error: null } });
     case "publishPost": {
       if (!state.composer || action.version !== state.version || !validTimestamp(action.at)) return state;
       if (state.composer.workout && publishedWorkoutPost(state, state.composer.workout.workoutId)) return state;
-      const error = (state.composer.workout && !state.composer.text.trim() && state.composer.text.length <= POST_LIMIT
-        ? null : validateSocialText(state.composer.text, POST_LIMIT, "a post"))
-        ?? (state.posts.filter((post) => post.origin === "local").length >= MAX_LOCAL_POSTS ? "This demo has reached its 50-post limit." : null);
+      const error = postValidationError(state);
       if (error) return update(state, { composer: { ...state.composer, error } });
       return update(state, {
         posts: [{ id: `local-post-${state.nextId}`, authorId: LOCAL_AUTHOR_ID, text: state.composer.text.trim(),
           createdAt: action.at, origin: "local", achievementId: state.composer.achievementId,
+          ...(state.composer.media ? { media: { ...state.composer.media } } : {}),
           ...(state.composer.workout ? { workout: createWorkoutAttachment({ id: state.composer.workout.workoutId, sets: state.composer.workout.sets,
             metrics: state.composer.workout.metrics }) } : {}),
         }, ...state.posts],
@@ -242,7 +314,8 @@ export function socialReducer(state: SocialState, action: SocialAction): SocialS
     }
     case "requestDiscard":
       if (action.target === "composer" ? !state.composer : !hasSocialDraft(state)) return state;
-      return update(state, { discardPrompt: action.target });
+      return update(state, { discardPrompt: action.target,
+        ...(state.composer ? { composer: { ...state.composer, mediaPending: undefined } } : {}) });
     case "cancelDiscard": return state.discardPrompt ? update(state, { discardPrompt: null, discardDraftId: null }) : state;
     case "confirmDiscard":
       if (!state.discardPrompt) return state;

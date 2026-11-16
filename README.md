@@ -4,9 +4,9 @@ FitSocial currently contains a local-only Expo/React Native prototype, a health-
 
 ## Mobile prototype
 
-Five tabs: Home, Train, Create, Feed and Profile. The prototype supports guided selection from 423 exercise records, strength/cardio logging, session history, workout sharing, drafts, discovery/search, fictional trainer/community examples, and local profile/settings preferences.
+Five tabs: Home, Train, Rewards, Feed and Profile. Create Post is a secondary screen. The prototype supports guided selection from 423 exercise records, strength/cardio logging, session history, workout sharing, drafts, discovery/search, fictional trainer/community examples, and local profile/settings preferences.
 
-All mobile data stays in memory. Process restart clears it. There is no real login, backend integration, persistent mobile storage, online publication, notification delivery or enforced account privacy. Public/Private is a future preference with no access-control effect. Fictional examples and demo interactions are labeled.
+Mobile session state stays in memory; selected media uses disposable local cache files. Process restart clears session state. There is no real login, backend integration, permanent session persistence, online publication, notification delivery or enforced account privacy. Public/Private is a future preference with no access-control effect. Fictional examples and demo interactions are labeled.
 
 ## Repository
 

@@ -1,3 +1,4 @@
+import { ContentTransition } from "../navigation/ContentTransition";
 import { formatWorkoutTotals } from "./workoutState";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -22,12 +23,14 @@ export function WorkoutAttachmentView({ attachment, initiallyExpanded = false }:
     <TextButton label={expanded ? "Hide workout details" : "View workout details"}
       accessibilityLabel={(expanded ? "Hide" : "View") + " workout " + attachment.workoutId + " recorded activity details. Duration " + formatDuration(attachment.metrics?.durationMs)}
       expanded={expanded} onPress={() => setExpanded(!expanded)} />
+    <ContentTransition transitionKey={String(expanded)} distance={12} visible={expanded}>
     {expanded && <>
       <Text style={type.caption}>{formatWorkoutTotals(attachment.sets)}</Text>
       <WorkoutSetList sets={attachment.sets} />
     </>}
+    </ContentTransition>
   </View>;
 }
 const styles = StyleSheet.create({
-  preview: { backgroundColor: colors.surface, borderLeftWidth: 2, borderLeftColor: colors.accent, borderRadius: radii.card, padding: spacing.md, gap: spacing.sm },
+  preview: { backgroundColor: colors.elevated, borderLeftWidth: 2, borderLeftColor: colors.accent, borderRadius: radii.card, padding: spacing.md, gap: spacing.md },
 });

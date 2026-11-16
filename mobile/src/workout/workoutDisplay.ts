@@ -1,9 +1,10 @@
+import { WeightUnit } from "./weightUnits";
 import { CardioMetric, formatPace, paceSecondsPerKm } from "./cardio";
 import { formatLoggedSet, LoggedSet } from "./workoutState";
 
 // Presentation only. Keep recorded values and session-duration calculations unchanged.
-export function entryDisplay(set: Readonly<LoggedSet>): string {
-  if (set.tracking !== "cardio") return formatLoggedSet(set);
+export function entryDisplay(set: Readonly<LoggedSet>, unit: WeightUnit = "kg"): string {
+  if (set.tracking !== "cardio") return formatLoggedSet(set, unit);
   const seconds = set.durationSeconds;
   const parts = [seconds === undefined ? "Time unavailable" : seconds < 60 ? seconds + " sec"
     : Math.floor(seconds / 60) + " min" + (seconds % 60 ? " " + seconds % 60 + " sec" : "")];

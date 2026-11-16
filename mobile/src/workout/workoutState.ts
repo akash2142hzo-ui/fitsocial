@@ -1,3 +1,4 @@
+import { formatWeightValue, parseWeightDraft, WeightDraft, WeightUnit } from "./weightUnits";
 import { CardioDraft, CardioMetric, CardioValues, cardioMetrics, validateCardio, paceSecondsPerKm, formatPace } from "./cardio";
 import { exerciseCatalog, ExerciseName, exercises, TrackingType } from "./exerciseCatalog";
 import { ClockSample, finishMetrics, formatDuration, validClock, validateBodyWeight, WorkoutMetrics } from "./workoutMetrics";
@@ -5,7 +6,7 @@ export { exercises } from "./exerciseCatalog";
 export type Exercise = ExerciseName;
 export const MAX_SETS_PER_EXERCISE = 20;
 export const MAX_SESSION_SETS = 100;
-export type LoggedSet = { id: number; exerciseId: string; exercise: Exercise; reps: number; weight: number | null; tracking?: TrackingType; durationSeconds?: number; cardio?: Readonly<CardioValues>; cardioCategory?: string };
+export type LoggedSet = { id: number; exerciseId: string; exercise: Exercise; reps: number; weight: number | null; weightInputUnit?: WeightUnit; tracking?: TrackingType; durationSeconds?: number; cardio?: Readonly<CardioValues>; cardioCategory?: string };
 export type CompletedWorkout = {
   readonly id: number;
   readonly sets: readonly Readonly<LoggedSet>[];
@@ -18,7 +19,9 @@ export type WorkoutState = {
   sets: LoggedSet[];
   exercise: Exercise | null;
   reps: string;
-  weight: string;
+  weight: string; // Kilogram draft; never a pounds number. Invalid drafts remain strings.
+  weightUnit: WeightUnit;
+  weightDraft: WeightDraft | null; // Original edit retained so unit switches never round-trip display text.
   revision: number;
   nextId: number;
   error: string | null;
@@ -34,30 +37,30 @@ export type WorkoutState = {
 };
 export const initialWorkout: WorkoutState = {
   status: "idle", confirming: false, sets: [], exercise: null,
-  reps: "", weight: "", revision: 0, nextId: 1, error: null,
+  reps: "", weight: "", weightUnit: "kg", weightDraft: null, revision: 0, nextId: 1, error: null,
   history: [], nextWorkoutId: 1,
   completed: null, saved: false, durationInput: "", cardioDraft: {}, clock: null, bodyWeightInput: "", bodyWeightError: null,
 };
 
-export function validateSet(repsInput: string, weightInput: string, options?: { required: boolean; allowZero: boolean }):
+export function validateSet(repsInput: string, weightInput: string, options?: { required: boolean; allowZero: boolean; unit?: WeightUnit }):
   | { valid: true; reps: number; weight: number | null }
   | { valid: false; error: string } {
   const reps = repsInput.trim();
   const weight = weightInput.trim();
-  if (options?.required && !weight) return { valid: false, error: "Enter lifted weight in kg before logging." };
+  const unit = options?.unit ?? "kg";
+  if (options?.required && !weight) return { valid: false, error: `Enter lifted weight in ${unit} before logging.` };
   if (options && !options.allowZero && weight !== "" && Number(weight) === 0) return { valid: false, error: "Enter a positive lifted weight for this exercise. Blank is not zero." };
   if (!/^\d{1,4}$/.test(reps) || Number(reps) < 1 || Number(reps) > 1000) {
     return { valid: false, error: "Enter whole repetitions from 1 to 1,000." };
   }
-  if (weight !== "" && (!/^(?:\d{1,4}(?:\.\d{0,2})?|\.\d{1,2})$/.test(weight)
-    || !Number.isFinite(Number(weight)) || Number(weight) > 1000)) {
-    return { valid: false, error: "Enter 0 to 1,000 kg, with up to two decimal places, or leave weight blank. Use a decimal point." };
-  }
-  return { valid: true, reps: Number(reps), weight: weight === "" ? null : Number(weight) };
+  const checked = parseWeightDraft({ text: weight, unit });
+  if (!checked.valid) return checked;
+  return { valid: true, reps: Number(reps), weight: checked.kg };
 }
 
 export type WorkoutAction =
   | { type: "start" | "finish"; clock: ClockSample }
+  | { type: "setWeightUnit"; unit: WeightUnit }
   | { type: "editCardio"; field: CardioMetric; value: string }
   | { type: "editBodyWeight"; value: string }
   | { type: "selectExercise"; exercise: Exercise }
@@ -107,7 +110,7 @@ export function workoutReducer(state: WorkoutState, action: WorkoutAction): Work
     if (!bodyWeight.valid) return { ...state, confirming: false, bodyWeightError: bodyWeight.error };
     if (!state.clock || !validClock(action.clock)) return { ...state, error: "Workout time is unavailable. Retry finishing or keep logging." };
     return {
-      ...state, status: "completed", confirming: false, reps: "", weight: "", revision: state.revision + 1,
+      ...state, status: "completed", confirming: false, reps: "", weight: "", weightDraft: null, revision: state.revision + 1,
       // Record completion atomically, once. History does not share editable set objects.
       completed: { id: state.nextWorkoutId, sets: state.sets.map(cloneLoggedSet),
         metrics: finishMetrics(state.clock, action.clock, bodyWeight.kg) }, saved: false,
@@ -118,10 +121,22 @@ export function workoutReducer(state: WorkoutState, action: WorkoutAction): Work
   switch (action.type) {
     case "selectExercise":
       if (!exercises.includes(action.exercise) || action.exercise === state.exercise) return state;
-      return { ...state, exercise: action.exercise, reps: "", weight: "", durationInput: "", cardioDraft: {}, error: null, revision: state.revision + 1 };
+      return { ...state, exercise: action.exercise, reps: "", weight: "", weightDraft: null, durationInput: "", cardioDraft: {}, error: null, revision: state.revision + 1 };
     case "editCardio":
       return { ...state, cardioDraft: { ...state.cardioDraft, [action.field]: action.value }, error: null, revision: state.revision + 1 };
+    case "setWeightUnit": {
+      if ((action.unit !== "kg" && action.unit !== "lb") || action.unit === (state.weightUnit ?? "kg")) return state;
+      const checked = parseWeightDraft(state.weightDraft ?? { text: state.weight, unit: "kg" });
+      if (!checked.valid) return { ...state, error: checked.error };
+      return { ...state, weightUnit: action.unit, error: null, revision: state.revision + 1 };
+    }
     case "edit":
+      if (action.field === "weight") {
+        const unit = state.weightUnit ?? "kg";
+        const checked = parseWeightDraft({ text: action.value, unit });
+        return { ...state, weight: unit === "lb" && checked.valid ? (checked.kg === null ? "" : String(checked.kg)) : action.value,
+          weightDraft: { text: action.value, unit }, error: null, revision: state.revision + 1 };
+      }
       return { ...state, [action.field]: action.value, error: null, revision: state.revision + 1 };
     case "removeSet":
       return { ...state, sets: state.sets.filter((set) => set.id !== action.id), error: null, revision: state.revision + 1 };
@@ -131,7 +146,8 @@ export function workoutReducer(state: WorkoutState, action: WorkoutAction): Work
       if (!state.exercise) return { ...state, error: "Choose an exercise first." };
       const definition = exerciseCatalog.find((entry) => entry.name === state.exercise)!;
       const input = (definition.tracking === "duration" || definition.tracking === "cardio")
-        ? validateDuration(state.durationInput) : validateSet(state.reps, state.weight, { required: definition.tracking === "external", allowZero: definition.tracking !== "external" || definition.allowZeroWeight });
+        ? validateDuration(state.durationInput) : validateSet(state.reps, state.weightDraft?.text ?? state.weight, { required: definition.tracking === "external", allowZero: definition.tracking !== "external" || definition.allowZeroWeight,
+          unit: !state.weight.trim() ? state.weightUnit ?? "kg" : state.weightDraft?.unit ?? "kg" });
       if (!input.valid) return { ...state, error: input.error };
       const cardio = validateCardio(state.cardioDraft, definition.supportedMetrics);
       if (!cardio.valid) return { ...state, error: cardio.error };
@@ -142,10 +158,11 @@ export function workoutReducer(state: WorkoutState, action: WorkoutAction): Work
       return {
         ...state,
         sets: [...state.sets, { id: state.nextId, exerciseId: exerciseCatalog.find((exercise) => exercise.name === state.exercise)!.id,
-          exercise: state.exercise, reps: input.reps, weight: input.weight, tracking: definition.tracking,
+          exercise: state.exercise, reps: input.reps, weight: input.weight,
+          ...(state.weightDraft?.unit === "lb" && input.weight !== null ? { weightInputUnit: "lb" as const } : {}), tracking: definition.tracking,
           ...((definition.tracking === "duration" || definition.tracking === "cardio") && "durationSeconds" in input && typeof input.durationSeconds === "number" ? { durationSeconds: input.durationSeconds } : {}),
           ...(definition.tracking === "cardio" ? { cardio: { ...cardio.values }, cardioCategory: definition.cardioCategory } : {}) }],
-        nextId: state.nextId + 1, revision: state.revision + 1, reps: "", weight: "", durationInput: "", cardioDraft: {}, error: null,
+        nextId: state.nextId + 1, revision: state.revision + 1, reps: "", weight: "", weightDraft: null, durationInput: "", cardioDraft: {}, error: null,
       };
     }
   }
@@ -187,7 +204,7 @@ export function validateDuration(input: string): { valid: true; reps: number; we
   return { valid: true, reps: 0, weight: null, durationSeconds: Number(input) };
 }
 // Legacy sets without a mode retain their original external-weight meaning.
-export function formatLoggedSet(set: Readonly<LoggedSet>) {
+export function formatLoggedSet(set: Readonly<LoggedSet>, unit: WeightUnit = "kg") {
   if (set.tracking === "cardio") {
     const details = ["Activity time " + formatDuration(set.durationSeconds === undefined ? undefined : set.durationSeconds * 1000)];
     for (const key of Object.keys(cardioMetrics) as CardioMetric[]) {
@@ -203,7 +220,8 @@ export function formatLoggedSet(set: Readonly<LoggedSet>) {
   if (set.tracking === "duration") return String(set.durationSeconds) + " seconds";
   const mode = set.tracking ?? "external";
   const weight = set.weight === null ? (mode === "bodyweight" ? "No additional weight" : mode === "assisted" ? "Assistance not recorded" : "weight not recorded")
-    : String(set.weight) + (mode === "bodyweight" ? " kg added" : mode === "assisted" ? " kg assistance" : " kg");
+    : (unit === "kg" && set.weightInputUnit !== "lb" ? String(set.weight) : formatWeightValue(set.weight, unit))
+      + ` ${unit}` + (mode === "bodyweight" ? " added" : mode === "assisted" ? " assistance" : "");
   return String(set.reps) + " reps \u00b7 " + weight;
 }
 

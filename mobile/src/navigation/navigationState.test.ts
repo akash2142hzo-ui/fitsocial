@@ -1,8 +1,8 @@
 import { initialNavigation, navigationReducer, selectedPrimaryTab, tabs } from "./navigationState";
 
 describe("local prototype navigation", () => {
-  it("has Home, Train, Create, Feed and Profile as the five primary destinations", () => {
-    expect(tabs.map((tab) => tab.label)).toEqual(["Home", "Train", "Create", "Feed", "Profile"]);
+  it("has Home, Train, Rewards, Feed and Profile as the five primary destinations", () => {
+    expect(tabs.map((tab) => tab.label)).toEqual(["Home", "Train", "Rewards", "Feed", "Profile"]);
   });
   it("starts at welcome and ignores tab changes before entering the demo", () => {
     expect(navigationReducer(initialNavigation, { type: "selectTab", tab: "feed" }))
@@ -36,7 +36,7 @@ describe("local prototype navigation", () => {
 
 describe("secondary destinations and author profiles", () => {
   it.each([
-    ["home", "progress"], ["profile", "progress"], ["feed", "groups"], ["profile", "groups"], ["profile", "settings"],
+    ["home", "progress"], ["profile", "progress"], ["feed", "groups"], ["profile", "groups"], ["profile", "settings"], ["feed", "create"],
   ] as const)("returns from %s / %s to its entry tab", (entry, destination) => {
     const initial = navigationReducer(initialNavigation, { type: "openPrototype" });
     const parent = navigationReducer(initial, { type: "selectTab", tab: entry });

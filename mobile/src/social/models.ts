@@ -1,4 +1,5 @@
 import { WorkoutAttachment } from "../workout/workoutSharing";
+import type { LocalMedia } from "./localMedia";
 
 export type Author = {
   id: string;
@@ -22,6 +23,7 @@ export type Post = {
   origin: "sample" | "local";
   achievementId: string | null;
   workout?: WorkoutAttachment;
+  media?: LocalMedia;
 };
 export type Comment = {
   id: string;

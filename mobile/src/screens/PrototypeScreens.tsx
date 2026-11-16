@@ -1,43 +1,52 @@
+import { SocialAreaTabs } from "../social/FeedControls";
 import { WorkoutShareAction } from "../social/WorkoutShareAction";
 import { SettingsScreen } from "../social/SettingsScreen";
 import { TrainerDiscovery, TrainerSetup } from "../social/TrainerScreens";
-import { identityFor } from "../social/trainerIdentity";
+import { visiblePosts } from "../social/socialState";
+import { BattleRopeImage } from "../components/BattleRopeImage";
 import { ActivityChart } from "../components/ActivityChart";
 import { useEffect, useState } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
-import { Avatar, Button, EmptyState, Heading, Stats, TextButton } from "../components/ui";
-import { TabId } from "../navigation/navigationState";
+import { Button, EmptyState, Heading, Stats, TextButton } from "../components/ui";
+import { ContentTransition } from "../navigation/ContentTransition";
+import { FeedSection, TabId } from "../navigation/navigationState";
 import { colors } from "../theme/colors";
-import { type, ui } from "../theme/design";
-import { WorkoutLogger, WorkoutProps } from "../workout/WorkoutLogger";
+import { radii, spacing, type, ui } from "../theme/design";
+import { TrainScreen } from "../workout/TrainScreen";
+import { WorkoutProps } from "../workout/WorkoutLogger";
 import { WorkoutAttachmentView } from "../workout/WorkoutAttachmentView";
 import { createWorkoutAttachment } from "../workout/workoutSharing";
 import { formatCalories, formatDuration, sampleClock, CALORIE_DISCLAIMER } from "../workout/workoutMetrics";
 import { useWorkoutDuration } from "../workout/useWorkoutDuration";
 import { formatWorkoutTotals, summarizeHistory } from "../workout/workoutState";
-import { AuthorNavigationProps, CreatePostScreen, FeedScreen, GroupsScreen, SocialProps } from "../social/SocialScreens";
+import { AuthorNavigationProps, PostCard, CreatePostScreen, FeedScreen, GroupsScreen, SocialProps } from "../social/SocialScreens";
 import { ProfileScreen } from "../social/ProfileScreen";
+import { RewardsScreen } from "./RewardsScreen";
 import { relativeWorkoutTime, todayWorkoutCount } from "../workout/workoutPresentation";
 
-type PrototypeScreenProps = WorkoutProps & SocialProps & AuthorNavigationProps & { activeTab: TabId; authorId?: string; onNavigate: (tab: TabId) => void };
+type PrototypeScreenProps = WorkoutProps & SocialProps & AuthorNavigationProps & { activeTab: TabId; feedSection?: FeedSection; trainingSettingsOpen?: boolean; onActiveWorkoutViewChange?: (active: boolean) => void; authorId?: string; onNavigate: (tab: TabId) => void };
 
-export function PrototypeScreen({ activeTab, authorId, onOpenAuthor, onNavigate, workout, onWorkoutAction, onShareWorkout, social, onSocialAction }: PrototypeScreenProps) {
+export function PrototypeScreen({ activeTab, feedSection = "forYou", trainingSettingsOpen, onActiveWorkoutViewChange, authorId, onOpenAuthor, onNavigate, workout, onWorkoutAction, onShareWorkout, social, onSocialAction }: PrototypeScreenProps) {
   switch (activeTab) {
+    case "rewards": return <RewardsScreen />;
     case "settings": return <SettingsScreen social={social} onSocialAction={onSocialAction} />;
     case "trainers": return <TrainerDiscovery social={social} onSocialAction={onSocialAction} onOpenAuthor={onOpenAuthor} />;
     case "trainerSetup": return <TrainerSetup social={social} onSocialAction={onSocialAction} onDone={() => onNavigate("profile")} />;
-    case "home": return <HomeScreen workout={workout} onWorkoutAction={onWorkoutAction} onShareWorkout={onShareWorkout} social={social} onNavigate={onNavigate} />;
-    case "workouts": return <WorkoutLogger social={social} workout={workout} onWorkoutAction={onWorkoutAction} onShareWorkout={onShareWorkout} />;
+    case "home": return <HomeScreen workout={workout} onWorkoutAction={onWorkoutAction} onShareWorkout={onShareWorkout} social={social} onSocialAction={onSocialAction} onOpenAuthor={onOpenAuthor} onNavigate={onNavigate} />;
+    case "workouts": return <TrainScreen onActiveWorkoutViewChange={onActiveWorkoutViewChange} settingsOpen={trainingSettingsOpen} onOpenProgress={() => onNavigate("progress")} social={social} workout={workout} onWorkoutAction={onWorkoutAction} onShareWorkout={onShareWorkout} />;
     case "progress": return <ProgressScreen social={social} workout={workout} onNavigate={onNavigate} onShareWorkout={onShareWorkout} />;
     case "create": return <CreatePostScreen social={social} onSocialAction={onSocialAction} workout={workout} onShareWorkout={onShareWorkout} />;
-    case "feed": return <FeedScreen social={social} onSocialAction={onSocialAction} onOpenAuthor={onOpenAuthor} onCreatePost={() => onNavigate("create")} onOpenGroups={() => onNavigate("groups")} onOpenTrainers={() => onNavigate("trainers")} />;
+    case "feed": return <ContentTransition transitionKey={feedSection} duration={200} order="forYou,trainers,groups">
+      {feedSection === "trainers" ? <TrainerDiscovery social={social} onSocialAction={onSocialAction} onOpenAuthor={onOpenAuthor} /> : feedSection === "groups" ? <GroupsScreen social={social} onSocialAction={onSocialAction} /> : <FeedScreen social={social} onSocialAction={onSocialAction} onOpenAuthor={onOpenAuthor} onCreatePost={() => onNavigate("create")} onOpenGroups={() => onNavigate("groups")} onOpenTrainers={() => onNavigate("trainers")} />}
+    </ContentTransition>;
     case "groups": return <GroupsScreen social={social} onSocialAction={onSocialAction} />;
     case "profile": return <ProfileScreen social={social} onSocialAction={onSocialAction} history={workout.history} onOpenAuthor={onOpenAuthor} onNavigate={onNavigate} />;
-    case "author": return <ProfileScreen key={authorId} authorId={authorId} social={social} onSocialAction={onSocialAction} history={workout.history} onOpenAuthor={onOpenAuthor} onNavigate={onNavigate} />;
+    case "author": return <ProfileScreen publicView key={authorId} authorId={authorId} social={social} onSocialAction={onSocialAction} history={workout.history} onOpenAuthor={onOpenAuthor} onNavigate={onNavigate} />;
   }
 }
-function HomeScreen({ workout, onWorkoutAction, onShareWorkout, social, onNavigate }: WorkoutProps & Pick<SocialProps, "social"> & { onNavigate: (tab: TabId) => void }) {
+function HomeScreen({ workout, onWorkoutAction, onShareWorkout, social, onSocialAction, onOpenAuthor, onNavigate }: WorkoutProps & SocialProps & AuthorNavigationProps & { onNavigate: (tab: TabId) => void }) {
   const duration = useWorkoutDuration(workout);
+  const [progressFocused, setProgressFocused] = useState(false);
   const [todayTime, setTodayTime] = useState(Date.now);
   useEffect(() => {
     const update = () => setTodayTime(Date.now());
@@ -47,38 +56,48 @@ function HomeScreen({ workout, onWorkoutAction, onShareWorkout, social, onNaviga
   }, []);
   const recent = workout.history[0];
   const today = todayWorkoutCount(workout.history, todayTime);
-  const post = social.posts[0];
-  const author = post ? identityFor(social, post.authorId) : undefined;
+  // Reuse the single social state's Following selection; Feed itself always shows For You.
+  const following = social.filter === "following";
+  const selectedPosts = visiblePosts({ ...social, filter: following ? "following" : "all", feedQuery: "" });
+  const interestPosts = following ? selectedPosts : selectedPosts.slice(0, 2);
   return <View style={ui.stack}>
-    <Text accessibilityRole="header" style={type.heading}>Good to see you.</Text>
     <View style={[ui.card, homeStyles.hero]}>
-      <View accessible={false} style={homeStyles.stripe} />
-      <View style={homeStyles.heroArt} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <View style={homeStyles.arc} /><View style={homeStyles.arcInner} />
-      </View>
-      <View style={ui.between}><Heading>Make your next move.</Heading><TextButton label="View Progress" onPress={() => onNavigate("progress")} /></View>
+      <Text accessibilityRole="header" style={homeStyles.instruction}>Choose an exercise and make your first entry.</Text>
       <Text style={type.caption}>{workout.status === "active" ? "Workout in progress" : workout.completed && !workout.saved ? "Workout ready to review" : today ? String(today) + " saved today" : "No saved workout today"}</Text>
       {workout.status === "active" && <Text style={type.metric}>{formatDuration(duration)}</Text>}
       <Button label={workout.status === "active" ? "Continue workout" : workout.completed && !workout.saved ? "Review workout" : "Start workout"} onPress={() => {
         if (workout.status !== "active" && !(workout.completed && !workout.saved)) onWorkoutAction({ type: "start", clock: sampleClock() });
         onNavigate("workouts");
       }} />
+      <View style={homeStyles.progressRow}>
+        <Pressable accessibilityRole="button" accessibilityLabel="View Progress" onFocus={() => setProgressFocused(true)} onBlur={() => setProgressFocused(false)} onPress={() => onNavigate("progress")}
+          style={({ pressed }) => [homeStyles.progressAction, progressFocused && homeStyles.progressFocused, pressed && homeStyles.pressed]}>
+          <Text style={homeStyles.progressLabel}>View Progress</Text>
+        </Pressable>
+        <BattleRopeImage />
+      </View>
     </View>
     {recent ? <View style={ui.stack}>
-      <Heading>Last saved workout</Heading>
-      <Text style={type.caption}>{relativeWorkoutTime(recent.metrics?.finishedAt, todayTime)}</Text>
+      <View style={ui.between}><Heading>Last saved workout</Heading>
+      <Text style={type.caption}>{relativeWorkoutTime(recent.metrics?.finishedAt, todayTime)}</Text></View>
       <WorkoutAttachmentView attachment={createWorkoutAttachment(recent)} />
       <WorkoutShareAction social={social} workoutId={recent.id} onShare={onShareWorkout} />
-    </View> : workout.status === "idle" ? <Text style={type.caption}>Choose an exercise and make your first entry.</Text> : null}
+    </View> : null}
     {recent && <ActivityChart history={workout.history} now={todayTime} />}
     {recent && <Stats items={[{ value: workout.history.length, label: "saved workouts" }, { value: formatDuration(summarizeHistory(workout.history).durationMs), label: "workout time" }]} />}
-    <Heading>Community</Heading>
-    {post && author ? <Pressable accessibilityRole="button" accessibilityLabel="Open Feed" onPress={() => onNavigate("feed")} style={({ pressed }) => [ui.card, pressed && { opacity: 0.7 }]}>
-      <View style={ui.row}><Avatar initials={author.initials} /><Text style={[type.label, { flexShrink: 1 }]}>@{author.username}</Text></View>
-      <Text style={type.caption}>{post.origin === "sample" ? "Sample" : "Your local post"}</Text>
-      <Text style={type.body} numberOfLines={2}>{post.text || "Shared a workout"}</Text>
-      <Text style={type.caption}>Open Feed</Text>
-    </Pressable> : <EmptyState title="Start a conversation"><Button secondary label="Create a post" onPress={() => onNavigate("create")} /></EmptyState>}
+    <Text accessibilityRole="header" style={homeStyles.interestHeading}>Interest</Text>
+    <SocialAreaTabs items={[
+      { label: "For You", selected: !following, onPress: () => onSocialAction({ type: "setFilter", filter: "all" }) },
+      { label: "Following", selected: following, onPress: () => onSocialAction({ type: "setFilter", filter: "following" }) },
+    ]} />
+    {interestPosts.length ? <>
+      {interestPosts.map((post) => <PostCard key={post.id} post={post} social={social} onSocialAction={onSocialAction} onOpenAuthor={onOpenAuthor} />)}
+      <TextButton label="Open Feed" onPress={() => onNavigate("feed")} />
+    </> : <View style={ui.card}>
+      <Text style={type.body}>{following ? "Your following feed is quiet." : "No discovery posts yet."}</Text>
+      <Text style={type.caption}>{following ? "Follow fictional profiles to see their posts here." : "Explore Feed for fitness community posts."}</Text>
+      <TextButton label="Open Feed" onPress={() => onNavigate("feed")} />
+    </View>}
   </View>;
 }
 function ProgressScreen({ workout, onNavigate, onShareWorkout, social }: Pick<PrototypeScreenProps, "workout" | "onNavigate" | "onShareWorkout" | "social">) {
@@ -108,9 +127,12 @@ function ProgressScreen({ workout, onNavigate, onShareWorkout, social }: Pick<Pr
 }
 
 const homeStyles = StyleSheet.create({
-  hero: { overflow: "hidden", paddingTop: 12, backgroundColor: colors.accentSurface },
-  heroArt: { position: "absolute", right: -16, top: 12, width: 80, height: 80, opacity: 0.15 },
-  arc: { position: "absolute", width: 78, height: 78, borderRadius: 39, borderColor: colors.accent, borderWidth: 12 },
-  arcInner: { position: "absolute", left: 24, top: 24, width: 30, height: 30, borderRadius: 15, borderColor: colors.accent, borderWidth: 8 },
-  stripe: { position: "absolute", top: 0, left: 0, right: 0, height: 4, backgroundColor: colors.accent },
+  interestHeading: { ...type.title, fontSize: 24, lineHeight: 32, flexShrink: 1 },
+  instruction: { ...type.body, fontWeight: "600", flexShrink: 1 },
+  progressFocused: { backgroundColor: colors.accentSurface },
+  progressRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  progressAction: { flex: 2, minWidth: 44, minHeight: 48, justifyContent: "center", paddingVertical: spacing.xs },
+  progressLabel: { ...type.button, color: colors.accent, flexShrink: 1 },
+  pressed: { opacity: 0.72 },
+  hero: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs, borderRadius: radii.hero, backgroundColor: colors.elevated },
 });

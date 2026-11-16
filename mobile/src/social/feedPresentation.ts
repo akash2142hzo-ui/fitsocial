@@ -27,6 +27,7 @@ export function formatSharePreview(post: Post, identity?: Author): string {
     new Date(post.createdAt).toISOString(),
   ];
   if (post.text) lines.push(post.text);
+  if (post.media) lines.push(`Local ${post.media.kind} attachment. Media is not uploaded or exported in this preview.`);
   if (post.workout) {
     const attachment = post.workout;
     lines.push(`Actual completed local workout ${attachment.workoutId}`);

@@ -1,11 +1,11 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Input, Avatar, Button, EmptyState, Heading, TextButton } from "../components/ui";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Input, Button, EmptyState, FilterPill, Heading, TextButton } from "../components/ui";
 import { colors } from "../theme/colors";
-import { type, ui } from "../theme/design";
-import { AuthorNavigationProps, SocialProps } from "./SocialScreens";
+import { feedback, type, ui } from "../theme/design";
+import { SocialProps } from "./SocialScreens";
 import { identityFor } from "./trainerIdentity";
 import { authors, LOCAL_AUTHOR_ID } from "./sampleData";
-import { availabilityOptions, coachingModes, discoverTrainers, specializations, TrainerAction, TRAINER_ACKNOWLEDGMENT,
+import { availabilityOptions, coachingModes, specializations, TrainerAction, TRAINER_ACKNOWLEDGMENT,
   TRAINER_DISCLOSURE, trainerLimits, TrainerTextField, validateTrainer } from "./trainerState";
 
 const textFields: { field: TrainerTextField; label: string; multiline?: boolean }[] = [
@@ -33,15 +33,15 @@ export function TrainerSetup({ social, onSocialAction, onDone }: SocialProps & {
     </View>)}
     <Heading>Specializations</Heading>
     <Text style={type.caption}>Choose 1–4</Text>
-    <View style={ui.row}>{specializations.map((value) => <Button key={value} secondary label={value}
+    <View style={ui.row}>{specializations.map((value) => <FilterPill key={value} label={value}
       selected={draft.specializations.includes(value)} onPress={() => send({ type: "specialization", value })} />)}</View>
     <Heading>Coaching mode</Heading>
-    <View style={ui.row}>{coachingModes.map((value) => <Button key={value} secondary label={value} selected={draft.coachingMode === value} onPress={() => send({ type: "mode", value })} />)}</View>
+    <View style={ui.row}>{coachingModes.map((value) => <FilterPill key={value} label={value} selected={draft.coachingMode === value} onPress={() => send({ type: "mode", value })} />)}</View>
     <Heading>Availability</Heading>
-    <View style={ui.row}>{availabilityOptions.map((value) => <Button key={value} secondary label={value} selected={draft.availability === value} onPress={() => send({ type: "availability", value })} />)}</View>
+    <View style={ui.row}>{availabilityOptions.map((value) => <FilterPill key={value} label={value} selected={draft.availability === value} onPress={() => send({ type: "availability", value })} />)}</View>
     <Text style={type.caption}>A self-reported status. Contact and booking are not connected.</Text>
     <Pressable accessibilityRole="checkbox" accessibilityLabel={TRAINER_ACKNOWLEDGMENT} accessibilityState={{ checked: draft.acknowledged }}
-      onPress={() => send({ type: "acknowledge", value: !draft.acknowledged })} style={styles.acknowledgment}>
+      onPress={() => send({ type: "acknowledge", value: !draft.acknowledged })} style={({ pressed }) => [styles.acknowledgment, pressed && { opacity: feedback.pressedOpacity }]}>
       <Text style={styles.status}>{draft.acknowledged ? "[x]" : "[ ]"}</Text><Text style={styles.ackText}>{TRAINER_ACKNOWLEDGMENT}</Text>
     </Pressable>
     {social.trainers.error && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={type.error}>{social.trainers.error}</Text>}
@@ -86,36 +86,11 @@ export function TrainerDetails({ social, onSocialAction, authorId, onSetup }: So
     </>}
   </View>;
 }
-export function TrainerDiscovery({ social, onSocialAction, onOpenAuthor }: SocialProps & AuthorNavigationProps) {
-  const state = social.trainers;
-  const profiles = discoverTrainers(state);
-  const filter = (field: "query" | "specialization" | "coachingMode", value: string) => onSocialAction({ type: "trainer", action: { type: "filter", field, value } });
-  return <View style={ui.stack}>
-    <Text style={type.caption}>Self-declared · Unverified. {TRAINER_DISCLOSURE}</Text>
-    <Input accessibilityLabel="Search trainers by name, username or specialization" value={state.query} onChangeText={(value) => filter("query", value)}
-      maxLength={80} placeholder="Search trainers" placeholderTextColor={colors.muted} selectionColor={colors.accent} style={ui.input} />
-    <Text style={type.label}>Specialization</Text>
-    <ScrollView horizontal keyboardShouldPersistTaps="handled" contentContainerStyle={styles.filterRow}>
-      {["All", ...specializations].map((value) => <Button key={value} secondary label={value} selected={state.specialization === value} accessibilityLabel={"Trainer specialization filter: " + value} onPress={() => filter("specialization", value)} />)}
-    </ScrollView>
-    <Text style={type.label}>Coaching mode</Text>
-    <View style={ui.row}>{["All", ...coachingModes].map((value) => <Button key={value} secondary label={value} selected={state.coachingMode === value} accessibilityLabel={"Trainer coaching filter: " + value} onPress={() => filter("coachingMode", value)} />)}</View>
-    <Text accessibilityLiveRegion="polite" style={type.caption}>{profiles.length} trainers</Text>
-    {profiles.length === 0 && <EmptyState title="No matching trainers."><TextButton label="Reset trainer filters" onPress={() => { filter("query", ""); filter("specialization", "All"); filter("coachingMode", "All"); }} /></EmptyState>}
-    {profiles.map((profile) => <View key={profile.authorId} style={styles.discoveryCard}>
-      <View style={styles.identity}><Avatar initials={identityFor(social, profile.authorId)?.initials ?? "?"} /><View style={styles.identityText}>
-        <Heading>{profile.displayName}</Heading><Text style={type.caption}>@{profile.username}</Text>
-      </View></View>
-      <Text style={styles.status}>{profile.sample ? "Sample · Unverified" : "Unverified"}</Text>
-      <Text style={type.caption}>{profile.specializations.join(" · ")} · {profile.coachingMode}</Text>
-      <TextButton label="View profile" accessibilityLabel={"View trainer profile: " + profile.displayName} onPress={() => onOpenAuthor(profile.authorId)} />
-    </View>)}
-  </View>;
-}
+export { TrainerDiscovery } from "./TrainerDirectory";
 const styles = StyleSheet.create({
   field: { gap: 4 }, multiline: { minHeight: 96, maxHeight: 180, textAlignVertical: "top" },
   filterRow: { flexDirection: "row", gap: 8 },
-  status: { ...type.label }, details: { gap: 8 },
+  status: { ...type.label }, details: { gap: 12, minWidth: 0, maxWidth: "100%" },
   acknowledgment: { minHeight: 48, flexDirection: "row", gap: 8, alignItems: "center", paddingVertical: 8 }, ackText: { ...type.body, flex: 1 },
   identity: { flexDirection: "row", alignItems: "center", gap: 12 }, identityText: { flex: 1, minWidth: 0 },
   discoveryCard: { gap: 8, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },

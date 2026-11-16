@@ -1,15 +1,17 @@
 export const tabs = [
   { id: "home", label: "Home", title: "Your space to move." },
   { id: "workouts", label: "Train", title: "Build your rhythm." },
-  { id: "create", label: "Create", title: "New post" },
+  { id: "rewards", label: "Rewards", title: "FitSocial Rewards" },
   { id: "feed", label: "Feed", title: "Better with your people." },
   { id: "profile", label: "Profile", title: "Your profile" },
 ] as const;
 
 export type PrimaryTabId = (typeof tabs)[number]["id"];
-export type TabId = PrimaryTabId | "progress" | "groups" | "author" | "trainers" | "trainerSetup" | "settings";
+export type FeedSection = "forYou" | "trainers" | "groups";
+export type TabId = PrimaryTabId | "progress" | "groups" | "author" | "trainers" | "trainerSetup" | "settings" | "create";
 export const destinations = [
   ...tabs,
+  { id: "create", label: "Create Post", title: "New post" },
   { id: "settings", label: "Settings", title: "Your preferences" },
   { id: "trainers", label: "Trainers", title: "Discover trainers" },
   { id: "trainerSetup", label: "Trainer profile", title: "Self-declared trainer" },
@@ -50,7 +52,7 @@ export function navigationReducer(
       return { screen: "prototype", tab: "home" };
     case "selectTab":
       if (state.screen !== "prototype" || action.tab === "author") return state;
-      if (action.tab === "progress" || action.tab === "groups" || action.tab === "trainers" || action.tab === "trainerSetup" || action.tab === "settings") {
+      if (action.tab === "progress" || action.tab === "groups" || action.tab === "trainers" || action.tab === "trainerSetup" || action.tab === "settings" || action.tab === "create") {
         if (state.tab === action.tab) return state;
         return { screen: "prototype", tab: action.tab, parentTab: selectedPrimaryTab(state), backStack: [...state.backStack ?? [], snapshot(state)] };
       }

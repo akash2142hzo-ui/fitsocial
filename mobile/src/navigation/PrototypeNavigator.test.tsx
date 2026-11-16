@@ -116,7 +116,7 @@ it("dismisses the keyboard and resets when saving or resuming a draft, without r
   const dismiss = jest.spyOn(Keyboard, "dismiss");
   try {
     let social = socialReducer(createInitialSocialState(), { type: "openComposer" });
-    await render({ activeTab: "create", selectedTab: "create", social });
+    await render({ activeTab: "create", selectedTab: "feed", social });
     await nextFrame();
     mockScrollTo.mockClear(); dismiss.mockClear(); mockScrollY = 220;
     social = socialReducer(social, { type: "editPost", text: "Keep the cursor visible" });
