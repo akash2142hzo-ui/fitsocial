@@ -6,7 +6,23 @@ Use Python 3.13.x. Install the project and development extras intentionally thro
 
 A standalone online provider-token validator exists in `app/core/token_validation.py`. It is not wired into an API route or the mobile prototype. When explicitly invoked with configuration, it calls the fixed Supabase HTTPS user endpoint; it does not implement FitSocial account/session authorization. Tests use mocked transports, not live Supabase requests.
 
+`app/core/bearer_auth.py` adds an unwired FastAPI dependency adapter. A future
+dependency can use `Depends(bearer_authentication)` after importing the instance
+from that module; tests can inject a validator into `BearerAuthentication`.
+It rejects malformed/duplicate Authorization headers before loading settings or
+invoking validation, returns only the provider identity, and maps known failures
+to generic 401/503 responses. No existing route uses it. Account provisioning,
+account/session enforcement, database role/RLS verification, secure mobile
+session storage and durable logout remain prerequisites for product access.
+
 ## Configuration
+
+`app/core/account_transaction.py` adds an optional, unwired read-only transaction
+dependency downstream of Bearer validation. It uses a fresh restricted runtime
+connection, bound transaction-local identity, account/session checks before reads,
+and bounded rollback followed by connection closure. Existing routes remain
+unchanged. See `TASK_046A_VERIFICATION.md` for actual disposable PostgreSQL results,
+driver/Windows prerequisites and remaining product/hosted security work.
 
 Run backend commands from `backend/`; settings load `.env` relative to the working directory. Development and test environments can run without service credentials. See `.env.example` for the supported variable names.
 
